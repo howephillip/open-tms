@@ -1,0 +1,155 @@
+// File: backend/src/controllers/dashboardController.ts
+import { Request, Response } from 'express';
+import { Shipment } from '../models/Shipment'; // Assuming IShipment has customerRate, carrierCostTotal
+import { Carrier } from '../models/Carrier';
+import { Shipper } from '../models/Shipper';
+import { logger } from '../utils/logger';
+import mongoose from 'mongoose';
+import moment from 'moment'; // For date manipulations
+
+export class DashboardController {
+
+  // --- GET Key Performance Indicators (KPIs) ---
+  async getKPIs(req: Request, res: Response): Promise<void> {
+    logger.info('Fetching KPIs for dashboard');
+    try {
+      const totalShipments = await Shipment.countDocuments();
+      
+      // Calculate financial KPIs from "delivered" or "invoiced" or "paid" shipments
+      // Adjust status array as per your business logic for when revenue/profit is realized
+      const realizedShipmentStatuses: Shipment['status'][] = ['delivered', 'invoiced', 'paid'];
+
+      const financialAgg = await Shipment.aggregate([
+        { $match: { status: { $in: realizedShipmentStatuses } } },
+        {
+          $group: {
+            _id: null,
+            totalRevenue: { $sum: '$customerRate' },
+            totalCost: { $sum: '$carrierCostTotal' },
+          }
+        }
+      ]);
+
+      let totalRevenue = 0;
+      let totalCost = 0;
+      if (financialAgg.length > 0) {
+        totalRevenue = financialAgg[0].totalRevenue || 0;
+        totalCost = financialAgg[0].totalCost || 0;
+      }
+
+      const grossProfit = totalRevenue - totalCost;
+      const averageMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
+
+      const totalCarriers = await Carrier.countDocuments({ isActive: true }); // Assuming an isActive field
+      const totalShippers = await Shipper.countDocuments();
+
+
+      res.status(200).json({
+        success: true,
+        data: {
+          totalShipments,
+          totalRevenue,
+          grossProfit,
+          averageMargin: parseFloat(averageMargin.toFixed(2)), // Ensure two decimal places
+          totalCarriers,
+          totalShippers,
+        }
+      });
+
+    } catch (error: any) {
+      logger.error('Error fetching KPIs for dashboard:', { message: error.message, stack: error.stack });
+      res.status(500).json({ success: false, message: 'Error fetching dashboard KPIs', errorDetails: error.message });
+    }
+  }
+
+  // --- GET Revenue & Profit Trends (e.g., last 6 months) ---
+  async getRevenueProfitTrends(req: Request, res: Response): Promise<void> {
+    logger.info('Fetching revenue/profit trends for dashboard');
+    try {
+      const months = 6; // Number of past months to include current
+      const monthlyData: { month: string; year: number; revenue: number; profit: number; }[] = [];
+      const realizedShipmentStatuses: Shipment['status'][] = ['delivered', 'invoiced', 'paid'];
+
+      for (let i = months - 1; i >= 0; i--) {
+        const targetMonth = moment().subtract(i, 'months');
+        const monthName = targetMonth.format('MMM'); // e.g., "Jan", "Feb"
+        const year = targetMonth.year();
+        
+        const startOfMonth = targetMonth.startOf('month').toDate();
+        const endOfMonth = targetMonth.endOf('month').toDate();
+
+        const aggResult = await Shipment.aggregate([
+          {
+            $match: {
+              status: { $in: realizedShipmentStatuses },
+              // Use scheduledDeliveryDate or actualDeliveryDateTime for when revenue is realized
+              scheduledDeliveryDate: { 
+                $gte: startOfMonth,
+                $lte: endOfMonth
+              }
+            }
+          },
+          {
+            $group: {
+              _id: null, // Group all documents in the month
+              totalRevenue: { $sum: '$customerRate' },
+              totalCost: { $sum: '$carrierCostTotal' }
+            }
+          }
+        ]);
+
+        let revenue = 0;
+        let cost = 0;
+        if (aggResult.length > 0 && aggResult[0]) {
+          revenue = aggResult[0].totalRevenue || 0;
+          cost = aggResult[0].totalCost || 0;
+        }
+        
+        monthlyData.push({
+          month: `${monthName} '${year.toString().slice(-2)}`, // e.g., "May '24"
+          year: year,
+          revenue: revenue,
+          profit: revenue - cost
+        });
+      }
+
+      res.status(200).json({ success: true, data: { trends: monthlyData } });
+
+    } catch (error: any) {
+      logger.error('Error fetching revenue/profit trends:', { message: error.message, stack: error.stack });
+      res.status(500).json({ success: false, message: 'Error fetching trends data', errorDetails: error.message });
+    }
+  }
+
+  // --- GET Shipment Status Distribution ---
+  async getShipmentStatusDistribution(req: Request, res: Response): Promise<void> {
+    logger.info('Fetching shipment status distribution for dashboard');
+    try {
+      const statusDistribution = await Shipment.aggregate([
+        {
+          $group: {
+            _id: '$status', // Group by the status field
+            count: { $sum: 1 } // Count occurrences of each status
+          }
+        },
+        {
+          $project: {
+            _id: 0, // Exclude the default _id field from group stage
+            name: '$_id', // Rename _id (which is the status) to 'name'
+            value: '$count' // Rename count to 'value' (for chart compatibility)
+          }
+        },
+        {
+          $sort: { value: -1 } // Optional: sort by count descending
+        }
+      ]);
+
+      res.status(200).json({ success: true, data: { distribution: statusDistribution } });
+    } catch (error: any) {
+      logger.error('Error fetching shipment status distribution:', { message: error.message, stack: error.stack });
+      res.status(500).json({ success: false, message: 'Error fetching status distribution', errorDetails: error.message });
+    }
+  }
+
+  // You can add more dashboard-specific methods here, e.g., topLanes, carrierPerformanceSummary, etc.
+}

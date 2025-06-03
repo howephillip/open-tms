@@ -1,0 +1,23 @@
+# Ignore virtual environments
+venv/
+.venv/
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# VSCode and other editor configs
+.vscode/
+.idea/
+
+# Ignore node and package stuff (if applicable)
+node_modules/
+package-lock.json
+
+# MacOS files
+.DS_Store
+
+# Optional: compiled outputs or temporary files
+*.log
+*.tmp

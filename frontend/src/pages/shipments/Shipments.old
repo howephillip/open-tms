@@ -1,0 +1,746 @@
+// File: frontend/src/pages/shipments/Shipments.tsx
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  Box, Typography, Button, Paper, Table, TableBody, TableCell,
+  TableContainer, TableHead, TableRow, Chip, IconButton, Dialog, DialogTitle,
+  DialogContent, DialogActions, TextField, Grid, MenuItem, CircularProgress,
+  Alert, Tooltip, Divider, Checkbox, FormControlLabel, Icon,
+  InputAdornment
+} from '@mui/material';
+import {
+  Add as AddIcon, Edit as EditIcon, Visibility as ViewIcon,
+  CheckCircleOutline as CheckIcon, EmailOutlined as EmailIcon, DeleteOutline as DeleteIcon,
+  Search as SearchIcon, 
+  LocalShipping as DrayageIcon, Train as RailIcon, Unarchive as TransloadIcon,
+  Category as GenericRefIcon, ConfirmationNumber as BookingIcon, VpnKey as SealIcon,
+  Inventory2Outlined as ContainerIcon, DescriptionOutlined as DONumberIcon, 
+  ReceiptLongOutlined as BOLIcon, ArticleOutlined as PONumberIcon,    
+  FlightTakeoffOutlined as FlightIcon, DirectionsBoatOutlined as VesselIcon,
+} from '@mui/icons-material';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { shipmentAPI, shipperAPI, carrierAPI, lookupAPI } from '../../services/api';
+import { toast } from 'react-toastify';
+
+// --- Interfaces (Ensure these match your latest backend IShipment) ---
+interface ContactStub { name?: string; phone?: string; email?: string; }
+interface UserStub { _id: string; firstName?: string; lastName?: string; email?: string; }
+interface ShipperStub { _id: string; name: string; contact?: ContactStub; }
+interface CarrierStub { _id: string; name: string; mcNumber?: string; dotNumber?: string; contact?: ContactStub; }
+interface IReferenceNumberFE { type: string; value: string; _id?: string; }
+
+// Define types for enums to be used in both Shipment and ShipmentFormData
+type ModeOfTransportType = 
+    | 'truckload-ftl' | 'truckload-ltl' 
+    | 'drayage-import' | 'drayage-export' 
+    | 'intermodal-rail'
+    | 'ocean-fcl' | 'ocean-lcl' 
+    | 'air-freight' 
+    | 'expedited-ground' | 'final-mile' | 'other';
+
+type StatusType = 
+    | 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up' 
+    | 'in_transit_origin_drayage' | 'at_origin_port_ramp' | 'in_transit_main_leg' 
+    | 'at_destination_port_ramp' | 'in_transit_destination_drayage' | 'at_delivery' 
+    | 'delivered' | 'pod_received' | 'invoiced' | 'paid' | 'cancelled' | 'on_hold' | 'problem' | string; // Allow string for flexibility if needed
+
+type LocationType = 'shipper_facility' | 'consignee_facility' | 'port_terminal' | 'rail_ramp' | 'airport_cargo' | 'warehouse' | 'other' | string;
+type WeightUnitType = 'lbs' | 'kg' | string;
+type EquipmentUnitType = 'ft' | 'm' | string;
+type TempUnitType = 'C' | 'F' | string;
+
+interface CheckIn {
+    _id?: string; dateTime: string | Date; method: 'phone' | 'email' | 'text' | 'api' | 'portal' | 'edi' | string;
+    contactPerson?: string; currentLocation?: string; notes: string; createdBy?: UserStub | string; statusUpdate?: StatusType;
+}
+
+interface Shipment {
+  _id: string; shipmentNumber: string; shipper: ShipperStub | string | null; carrier: CarrierStub | string | null;
+  modeOfTransport: ModeOfTransportType;
+  billOfLadingNumber?: string; proNumber?: string; deliveryOrderNumber?: string; bookingNumber?: string;
+  containerNumber?: string; sealNumber?: string; pickupNumber?: string; proofOfDeliveryNumber?: string;
+  purchaseOrderNumbers?: string[]; otherReferenceNumbers?: IReferenceNumberFE[];
+  steamshipLine?: string; vesselName?: string; voyageNumber?: string; terminal?: string;
+  lastFreeDayPort?: string; lastFreeDayRail?: string; emptyReturnDepot?: string; emptyContainerReturnByDate?: string;
+  chassisNumber?: string; chassisType?: string; chassisProvider?: string; chassisReturnByDate?: string;
+  railOriginRamp?: string; railDestinationRamp?: string; railCarrier?: string;
+  airline?: string; flightNumber?: string; masterAirWaybill?: string; houseAirWaybill?: string;
+  airportOfDeparture?: string; airportOfArrival?: string;
+  isTransload?: boolean; transloadFacility?: { name?: string; address?: string; city?: string; state?: string; zip?: string; };
+  transloadDate?: string;
+  origin: { name?: string; address: string; city: string; state: string; zip: string; country?: string; locationType?: LocationType; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
+  destination: { name?: string; address: string; city: string; state: string; zip: string; country?: string; locationType?: LocationType; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
+  scheduledPickupDate: string; scheduledPickupTime?: string; pickupAppointmentNumber?: string; actualPickupDateTime?: string;
+  scheduledDeliveryDate: string; scheduledDeliveryTime?: string; deliveryAppointmentNumber?: string; actualDeliveryDateTime?: string;
+  status: StatusType; equipmentType: string; equipmentLength?: number; equipmentUnit?: EquipmentUnitType;
+  commodityDescription: string; pieceCount?: number; packageType?: string; totalWeight?: number;
+  weightUnit?: WeightUnitType; isHazardous?: boolean; unNumber?: string; hazmatClass?: string;
+  isTemperatureControlled?: boolean; temperatureMin?: number; temperatureMax?: number; tempUnit?: TempUnitType;
+  customerRate: number; carrierCostTotal: number; grossProfit?: number; margin?: number;
+  internalNotes?: string; specialInstructions?: string; customTags?: string[];
+  checkIns?: CheckIn[]; documents?: any[]; createdBy?: UserStub | string; updatedAt?: string; createdAt?: string;
+}
+interface EquipmentTypeOption { _id: string; name: string; code?: string; category?: string; }
+interface ShipmentFormData {
+  _id?: string; shipmentNumber: string; shipper: string; carrier: string;
+  modeOfTransport: ModeOfTransportType;
+  billOfLadingNumber: string; proNumber: string; deliveryOrderNumber: string; bookingNumber: string;
+  containerNumber: string; sealNumber: string; pickupNumber: string; proofOfDeliveryNumber: string;
+  purchaseOrderNumbers: string; otherReferenceNumbersString: string;
+  steamshipLine: string; vesselName: string; voyageNumber: string; terminal: string;
+  lastFreeDayPort: string; lastFreeDayRail: string; emptyReturnDepot: string; emptyContainerReturnByDate: string;
+  chassisNumber: string; chassisType: string; chassisProvider: string; chassisReturnByDate: string;
+  railOriginRamp: string; railDestinationRamp: string; railCarrier: string;
+  airline: string; flightNumber: string; masterAirWaybill: string; houseAirWaybill: string;
+  airportOfDeparture: string; airportOfArrival: string;
+  isTransload: boolean; transloadFacilityName: string; transloadFacilityAddress: string;
+  transloadFacilityCity: string; transloadFacilityState: string; transloadFacilityZip: string;
+  transloadDate: string;
+  originName: string; originAddress: string; originCity: string; originState: string; originZip: string; originCountry: string; originLocationType: LocationType; originContactName: string; originContactPhone: string; originContactEmail: string; originNotes: string;
+  destinationName: string; destinationAddress: string; destinationCity: string; destinationState: string; destinationZip: string; destinationCountry: string; destinationLocationType: LocationType; destinationContactName: string; destinationContactPhone: string; destinationContactEmail: string; destinationNotes: string;
+  scheduledPickupDate: string; scheduledPickupTime: string; pickupAppointmentNumber: string; actualPickupDateTime: string;
+  scheduledDeliveryDate: string; scheduledDeliveryTime: string; deliveryAppointmentNumber: string; actualDeliveryDateTime: string;
+  status: StatusType; equipmentType: string; equipmentLength: string; equipmentUnit: EquipmentUnitType;
+  commodityDescription: string; pieceCount: string; packageType: string; totalWeight: string;
+  weightUnit: WeightUnitType; isHazardous: boolean; unNumber: string; hazmatClass: string;
+  isTemperatureControlled: boolean; temperatureMin: string; temperatureMax: string; tempUnit: TempUnitType;
+  customerRate: string; carrierCostTotal: string;
+  internalNotes: string; specialInstructions: string; customTags: string;
+}
+
+const initialFormData: ShipmentFormData = { /* ... same as before, ensure defaults for new types match ... */ 
+  _id: undefined, shipmentNumber: '', shipper: '', carrier: '',
+  modeOfTransport: 'truckload-ftl', billOfLadingNumber: '', proNumber: '', deliveryOrderNumber: '', bookingNumber: '',
+  containerNumber: '', sealNumber: '', pickupNumber: '', proofOfDeliveryNumber: '',
+  purchaseOrderNumbers: '', otherReferenceNumbersString: '',
+  steamshipLine: '', vesselName: '', voyageNumber: '', terminal: '',
+  lastFreeDayPort: '', lastFreeDayRail: '', emptyReturnDepot: '', emptyContainerReturnByDate: '',
+  chassisNumber: '', chassisType: '', chassisProvider: '', chassisReturnByDate: '',
+  railOriginRamp: '', railDestinationRamp: '', railCarrier: '',
+  airline: '', flightNumber: '', masterAirWaybill: '', houseAirWaybill: '', airportOfDeparture: '', airportOfArrival: '',
+  isTransload: false, transloadFacilityName: '', transloadFacilityAddress: '', transloadFacilityCity: '', transloadFacilityState: '', transloadFacilityZip: '', transloadDate: '',
+  originName: '', originAddress: '', originCity: '', originState: '', originZip: '', originCountry: 'USA', originLocationType: 'shipper_facility', originContactName: '', originContactPhone: '', originContactEmail: '', originNotes: '',
+  destinationName: '', destinationAddress: '', destinationCity: '', destinationState: '', destinationZip: '', destinationCountry: 'USA', destinationLocationType: 'consignee_facility', destinationContactName: '', destinationContactPhone: '', destinationContactEmail: '', destinationNotes: '',
+  scheduledPickupDate: '', scheduledPickupTime: '', pickupAppointmentNumber: '', actualPickupDateTime: '',
+  scheduledDeliveryDate: '', scheduledDeliveryTime: '', deliveryAppointmentNumber: '', actualDeliveryDateTime: '',
+  status: 'booked', equipmentType: '', equipmentLength: '', equipmentUnit: 'ft',
+  commodityDescription: '', pieceCount: '', packageType: '', totalWeight: '', weightUnit: 'lbs',
+  isHazardous: false, unNumber: '', hazmatClass: '', isTemperatureControlled: false, temperatureMin: '', temperatureMax: '', tempUnit: 'C',
+  customerRate: '', carrierCostTotal: '',
+  internalNotes: '', specialInstructions: '', customTags: '',
+};
+const initialCheckInFormData: CheckInFormData = { dateTime: new Date().toISOString(), method: 'email', contactPerson: '', currentLocation:'', notes: '' };
+
+// --- Hardcoded Options for Dropdowns (Can be moved to DB/API later) ---
+const modeOfTransportOptions: ModeOfTransportType[] = [
+    'truckload-ftl', 'truckload-ltl', 'drayage-import', 'drayage-export', 'intermodal-rail',
+    'ocean-fcl', 'ocean-lcl', 'air-freight', 'expedited-ground', 'final-mile', 'other'
+];
+const statusOptions: StatusType[] = [
+    'quote', 'booked', 'dispatched', 'at_pickup', 'picked_up', 'in_transit_origin_drayage', 
+    'at_origin_port_ramp', 'in_transit_main_leg', 'at_destination_port_ramp', 
+    'in_transit_destination_drayage', 'at_delivery', 'delivered', 'pod_received', 
+    'invoiced', 'paid', 'cancelled', 'on_hold', 'problem'
+];
+const locationTypeOptions: LocationType[] = [
+    'shipper_facility', 'consignee_facility', 'port_terminal', 'rail_ramp', 'airport_cargo', 'warehouse', 'other'
+];
+const weightUnitOptions: WeightUnitType[] = ['lbs', 'kg'];
+const equipmentUnitOptions: EquipmentUnitType[] = ['ft', 'm'];
+const tempUnitOptions: TempUnitType[] = ['C', 'F'];
+// --- End Hardcoded Options ---
+
+
+const Shipments: React.FC = () => {
+  const queryClient = useQueryClient();
+  const [isShipmentFormOpen, setIsShipmentFormOpen] = useState(false);
+  const [isCheckInFormOpen, setIsCheckInFormOpen] = useState(false);
+  const [isEmailGenOpen, setIsEmailGenOpen] = useState(false);    
+  const [isDetailViewOpen, setIsDetailViewOpen] = useState(false); 
+  const [currentShipment, setCurrentShipment] = useState<Shipment | null>(null);
+  const [shipmentFormData, setShipmentFormData] = useState<ShipmentFormData>(initialFormData);
+  const [checkInFormData, setCheckInFormData] = useState<CheckInFormData>(initialCheckInFormData);
+  const [generatedEmailContent, setGeneratedEmailContent] = useState('');
+  const [searchTermInput, setSearchTermInput] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
+
+  useEffect(() => {
+    const timerId = setTimeout(() => { setDebouncedSearchTerm(searchTermInput); }, 500);
+    return () => clearTimeout(timerId);
+  }, [searchTermInput]);
+
+  const { data: shipmentsResponse, isLoading: isLoadingShipments, isError: isErrorShipments, error: errorShipments } = 
+    useQuery(['shipments', debouncedSearchTerm], () => shipmentAPI.getAll({ limit: 50, sort: '-createdAt', ...(debouncedSearchTerm && { searchTerm: debouncedSearchTerm }) }), { keepPreviousData: true });
+  const shipments: Shipment[] = shipmentsResponse?.data?.data?.shipments || [];
+
+  const { data: shippersResponse, isLoading: isLoadingShippers } = 
+    useQuery('shippersListForShipmentForm', () => shipperAPI.getAll({ limit: 200, select: 'name _id' }));
+  const shippersList: ShipperStub[] = shippersResponse?.data?.data?.shippers || [];
+
+  const { data: carriersResponse, isLoading: isLoadingCarriers } = 
+    useQuery('carriersListForShipmentForm', () => carrierAPI.getAll({ limit: 200, select: 'name _id' }));
+  const carriersList: CarrierStub[] = carriersResponse?.data?.data?.carriers || [];
+
+  const { data: equipmentTypesResponse, isLoading: isLoadingEquipmentTypes } = 
+    useQuery('equipmentTypesLookup', lookupAPI.getEquipmentTypes);
+  const equipmentTypesList: EquipmentTypeOption[] = equipmentTypesResponse?.data?.data?.equipmentTypes || [];
+
+  const shipmentMutation = useMutation(
+    (data: { id?: string, formData: any }) => data.id ? shipmentAPI.update(data.id, data.formData) : shipmentAPI.create(data.formData),
+    { onSuccess: (response, variables) => { toast.success(response.data.message || `Shipment ${variables.id ? 'updated' : 'created'}!`); queryClient.invalidateQueries('shipments'); handleCloseShipmentForm();},
+      onError: (err: any, variables) => { toast.error(err.response?.data?.message || `Error ${variables.id ? 'updating' : 'creating'} shipment.`); console.error("Shipment Mutation error:", err.response?.data || err.message);},
+    }
+  );
+  const addCheckInMutation = useMutation( 
+    (data: { shipmentId: string, checkInData: Partial<CheckInFormData> }) => shipmentAPI.addCheckIn(data.shipmentId, data.checkInData),
+    { onSuccess: (response) => { toast.success(response.data.message || "Check-in added!"); queryClient.invalidateQueries('shipments'); queryClient.invalidateQueries(['shipmentDetails', currentShipment?._id]); handleCloseCheckInForm(); },
+      onError: (err: any) => {toast.error(err.response?.data?.message || "Error adding check-in.");}
+    }
+  );
+  const generateEmailMutation = useMutation(
+    (shipmentId: string) => shipmentAPI.generateEmail(shipmentId),
+    { onSuccess: (response) => { setGeneratedEmailContent(response.data.data.emailContent); setCurrentShipment(response.data.data.shipmentForContext); setIsEmailGenOpen(true); },
+      onError: (err: any) => {toast.error(err.response?.data?.message || "Error generating email.");}
+    }
+  );
+
+  const formatDateForInput = (dateString?: string | Date): string => { if (!dateString) return ''; try { const date = new Date(dateString); return date.toISOString().split('T')[0]; } catch (e) { return ''; }};
+  const formatDateTimeForInput = (dateTimeString?: string | Date): string => { if (!dateTimeString) return ''; try { const date = new Date(dateTimeString); return date.toISOString().substring(0, 16);} catch (e) {return '';}};
+
+  const handleOpenShipmentForm = (shipmentToEdit?: Shipment) => { 
+    if (shipmentToEdit) {
+      setCurrentShipment(shipmentToEdit);
+      setShipmentFormData({
+        _id: shipmentToEdit._id,
+        shipmentNumber: shipmentToEdit.shipmentNumber || '',
+        shipper: typeof shipmentToEdit.shipper === 'object' ? shipmentToEdit.shipper?._id || '' : shipmentToEdit.shipper || '',
+        carrier: typeof shipmentToEdit.carrier === 'object' ? shipmentToEdit.carrier?._id || '' : shipmentToEdit.carrier || '',
+        modeOfTransport: shipmentToEdit.modeOfTransport || 'truckload-ftl',
+        billOfLadingNumber: shipmentToEdit.billOfLadingNumber || '',
+        proNumber: shipmentToEdit.proNumber || '',
+        deliveryOrderNumber: shipmentToEdit.deliveryOrderNumber || '',
+        bookingNumber: shipmentToEdit.bookingNumber || '',
+        containerNumber: shipmentToEdit.containerNumber || '',
+        sealNumber: shipmentToEdit.sealNumber || '',
+        pickupNumber: shipmentToEdit.pickupNumber || '',
+        proofOfDeliveryNumber: shipmentToEdit.proofOfDeliveryNumber || '',
+        purchaseOrderNumbers: shipmentToEdit.purchaseOrderNumbers?.join(', ') || '',
+        otherReferenceNumbersString: shipmentToEdit.otherReferenceNumbers?.map(ref => `${ref.type}:${ref.value}`).join(', ') || '',
+        steamshipLine: shipmentToEdit.steamshipLine || '',
+        vesselName: shipmentToEdit.vesselName || '',
+        voyageNumber: shipmentToEdit.voyageNumber || '',
+        terminal: shipmentToEdit.terminal || '',
+        lastFreeDayPort: formatDateForInput(shipmentToEdit.lastFreeDayPort),
+        lastFreeDayRail: formatDateForInput(shipmentToEdit.lastFreeDayRail),
+        emptyReturnDepot: shipmentToEdit.emptyReturnDepot || '',
+        emptyContainerReturnByDate: formatDateForInput(shipmentToEdit.emptyContainerReturnByDate),
+        chassisNumber: shipmentToEdit.chassisNumber || '',
+        chassisType: shipmentToEdit.chassisType || '',
+        chassisProvider: shipmentToEdit.chassisProvider || '',
+        chassisReturnByDate: formatDateForInput(shipmentToEdit.chassisReturnByDate),
+        railOriginRamp: shipmentToEdit.railOriginRamp || '',
+        railDestinationRamp: shipmentToEdit.railDestinationRamp || '',
+        railCarrier: shipmentToEdit.railCarrier || '',
+        airline: shipmentToEdit.airline || '',
+        flightNumber: shipmentToEdit.flightNumber || '',
+        masterAirWaybill: shipmentToEdit.masterAirWaybill || '',
+        houseAirWaybill: shipmentToEdit.houseAirWaybill || '',
+        airportOfDeparture: shipmentToEdit.airportOfDeparture || '',
+        airportOfArrival: shipmentToEdit.airportOfArrival || '',
+        isTransload: shipmentToEdit.isTransload || false,
+        transloadFacilityName: shipmentToEdit.transloadFacility?.name || '',
+        transloadFacilityAddress: shipmentToEdit.transloadFacility?.address || '',
+        transloadFacilityCity: shipmentToEdit.transloadFacility?.city || '',
+        transloadFacilityState: shipmentToEdit.transloadFacility?.state || '',
+        transloadFacilityZip: shipmentToEdit.transloadFacility?.zip || '',
+        transloadDate: formatDateForInput(shipmentToEdit.transloadDate),
+        originName: shipmentToEdit.origin.name || '',
+        originAddress: shipmentToEdit.origin.address || '',
+        originCity: shipmentToEdit.origin.city || '',
+        originState: shipmentToEdit.origin.state || '',
+        originZip: shipmentToEdit.origin.zip || '',
+        originCountry: shipmentToEdit.origin.country || 'USA',
+        originLocationType: shipmentToEdit.origin.locationType || 'shipper_facility',
+        originContactName: shipmentToEdit.origin.contactName || '',
+        originContactPhone: shipmentToEdit.origin.contactPhone || '',
+        originContactEmail: shipmentToEdit.origin.contactEmail || '',
+        originNotes: shipmentToEdit.origin.notes || '',
+        destinationName: shipmentToEdit.destination.name || '',
+        destinationAddress: shipmentToEdit.destination.address || '',
+        destinationCity: shipmentToEdit.destination.city || '',
+        destinationState: shipmentToEdit.destination.state || '',
+        destinationZip: shipmentToEdit.destination.zip || '',
+        destinationCountry: shipmentToEdit.destination.country || 'USA',
+        destinationLocationType: shipmentToEdit.destination.locationType || 'consignee_facility',
+        destinationContactName: shipmentToEdit.destination.contactName || '',
+        destinationContactPhone: shipmentToEdit.destination.contactPhone || '',
+        destinationContactEmail: shipmentToEdit.destination.contactEmail || '',
+        destinationNotes: shipmentToEdit.destination.notes || '',
+        scheduledPickupDate: formatDateForInput(shipmentToEdit.scheduledPickupDate),
+        scheduledPickupTime: shipmentToEdit.scheduledPickupTime || '',
+        pickupAppointmentNumber: shipmentToEdit.pickupAppointmentNumber || '',
+        actualPickupDateTime: formatDateTimeForInput(shipmentToEdit.actualPickupDateTime),
+        scheduledDeliveryDate: formatDateForInput(shipmentToEdit.scheduledDeliveryDate),
+        scheduledDeliveryTime: shipmentToEdit.scheduledDeliveryTime || '',
+        deliveryAppointmentNumber: shipmentToEdit.deliveryAppointmentNumber || '',
+        actualDeliveryDateTime: formatDateTimeForInput(shipmentToEdit.actualDeliveryDateTime),
+        status: shipmentToEdit.status || 'booked',
+        equipmentType: shipmentToEdit.equipmentType || '',
+        equipmentLength: (shipmentToEdit.equipmentLength ?? '').toString(),
+        equipmentUnit: shipmentToEdit.equipmentUnit || 'ft',
+        commodityDescription: shipmentToEdit.commodityDescription || '',
+        pieceCount: (shipmentToEdit.pieceCount ?? '').toString(),
+        packageType: shipmentToEdit.packageType || '',
+        totalWeight: (shipmentToEdit.totalWeight ?? '').toString(),
+        weightUnit: shipmentToEdit.weightUnit || 'lbs',
+        isHazardous: shipmentToEdit.isHazardous || false,
+        unNumber: shipmentToEdit.unNumber || '',
+        hazmatClass: shipmentToEdit.hazmatClass || '',
+        isTemperatureControlled: shipmentToEdit.isTemperatureControlled || false,
+        temperatureMin: (shipmentToEdit.temperatureMin ?? '').toString(),
+        temperatureMax: (shipmentToEdit.temperatureMax ?? '').toString(),
+        tempUnit: shipmentToEdit.tempUnit || 'C',
+        customerRate: (shipmentToEdit.customerRate).toString(),
+        carrierCostTotal: (shipmentToEdit.carrierCostTotal).toString(),
+        internalNotes: shipmentToEdit.internalNotes || '',
+        specialInstructions: shipmentToEdit.specialInstructions || '',
+        customTags: shipmentToEdit.customTags?.join(', ') || '',
+      });
+    } else {
+      setCurrentShipment(null);
+      setShipmentFormData(initialFormData);
+    }
+    setIsShipmentFormOpen(true);
+  };
+  const handleCloseShipmentForm = () => setIsShipmentFormOpen(false);
+  const handleOpenCheckInForm = (shipment: Shipment) => { setCurrentShipment(shipment); setCheckInFormData({...initialCheckInFormData, dateTime: new Date().toISOString()}); setIsCheckInFormOpen(true);};
+  const handleCloseCheckInForm = () => setIsCheckInFormOpen(false);
+  const handleCloseEmailGen = () => setIsEmailGenOpen(false);
+  const handleCloseDetailView = () => setIsDetailViewOpen(false);
+  const handleOpenDetailView = (shipment: Shipment) => { setCurrentShipment(shipment); setIsDetailViewOpen(true);};
+
+  const handleShipmentFormInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { const target = event.target; const value = target.type === 'checkbox' ? (target as HTMLInputElement).checked : target.value; const name = target.name; setShipmentFormData(prev => ({ ...prev, [name]: value }));};
+  const handleShipmentFormSelectChange = (name: keyof ShipmentFormData, value: string | boolean) => { setShipmentFormData(prev => ({ ...prev, [name]: value }));};
+  const handleCheckInFormInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => { const { name, value } = event.target; setCheckInFormData(prev => ({ ...prev, [name]: value })); };
+  const handleCheckInFormSelectChange = (name: keyof CheckInFormData, value: string) => { setCheckInFormData(prev => ({ ...prev, [name]: value as CheckInFormData['method'] })); };
+
+  const handleSaveShipment = () => { /* ... same as before, mapping ShipmentFormData to API structure ... */ 
+      const { _id, purchaseOrderNumbers: poString, otherReferenceNumbersString, ...restOfFormData } = shipmentFormData;
+      const parseDate = (dateStr: string) => dateStr ? new Date(dateStr).toISOString() : undefined;
+      const parseDateTime = (dateTimeStr: string) => dateTimeStr ? new Date(dateTimeStr).toISOString() : undefined;
+
+      const apiData: any = {
+          ...restOfFormData, // Spread all string/boolean/number fields from form
+          shipper: shipmentFormData.shipper || undefined, 
+          carrier: shipmentFormData.carrier || undefined, 
+          equipmentLength: parseFloat(shipmentFormData.equipmentLength) || undefined,
+          pieceCount: parseInt(shipmentFormData.pieceCount) || undefined,
+          totalWeight: parseFloat(shipmentFormData.totalWeight) || undefined,
+          temperatureMin: parseFloat(shipmentFormData.temperatureMin) || undefined,
+          temperatureMax: parseFloat(shipmentFormData.temperatureMax) || undefined,
+          customerRate: parseFloat(shipmentFormData.customerRate) || 0, 
+          carrierCostTotal: parseFloat(shipmentFormData.carrierCostTotal) || 0, 
+          purchaseOrderNumbers: poString?.split(',').map(po => po.trim()).filter(po => po) || [],
+          otherReferenceNumbers: otherReferenceNumbersString?.split(',')
+              .map(refStr => { const [type, ...valP] = refStr.split(':'); return { type: type?.trim(), value: valP.join(':')?.trim() }; })
+              .filter(ref => ref.type && ref.value) || [],
+          customTags: shipmentFormData.customTags?.split(',').map(tag => tag.trim()).filter(tag => tag) || [],
+          origin: { name: shipmentFormData.originName, address: shipmentFormData.originAddress, city: shipmentFormData.originCity, state: shipmentFormData.originState, zip: shipmentFormData.originZip, country: shipmentFormData.originCountry, locationType: shipmentFormData.originLocationType, contactName: shipmentFormData.originContactName, contactPhone: shipmentFormData.originContactPhone, contactEmail: shipmentFormData.originContactEmail, notes: shipmentFormData.originNotes },
+          destination: { name: shipmentFormData.destinationName, address: shipmentFormData.destinationAddress, city: shipmentFormData.destinationCity, state: shipmentFormData.destinationState, zip: shipmentFormData.destinationZip, country: shipmentFormData.destinationCountry, locationType: shipmentFormData.destinationLocationType, contactName: shipmentFormData.destinationContactName, contactPhone: shipmentFormData.destinationContactPhone, contactEmail: shipmentFormData.destinationContactEmail, notes: shipmentFormData.destinationNotes },
+          transloadFacility: shipmentFormData.isTransload ? { name: shipmentFormData.transloadFacilityName, address: shipmentFormData.transloadFacilityAddress, city: shipmentFormData.transloadFacilityCity, state: shipmentFormData.transloadFacilityState, zip: shipmentFormData.transloadFacilityZip } : undefined,
+          
+          scheduledPickupDate: parseDate(shipmentFormData.scheduledPickupDate), 
+          scheduledDeliveryDate: parseDate(shipmentFormData.scheduledDeliveryDate), 
+          lastFreeDayPort: parseDate(shipmentFormData.lastFreeDayPort),
+          lastFreeDayRail: parseDate(shipmentFormData.lastFreeDayRail),
+          emptyContainerReturnByDate: parseDate(shipmentFormData.emptyContainerReturnByDate),
+          chassisReturnByDate: parseDate(shipmentFormData.chassisReturnByDate),
+          transloadDate: parseDate(shipmentFormData.transloadDate),
+          actualPickupDateTime: parseDateTime(shipmentFormData.actualPickupDateTime),
+          actualDeliveryDateTime: parseDateTime(shipmentFormData.actualDeliveryDateTime),
+      };
+      if (!apiData.isTransload) delete apiData.transloadFacility;
+      // Clean up optional numeric fields if they are NaN after parsing (or were empty strings)
+      ['equipmentLength', 'pieceCount', 'totalWeight', 'temperatureMin', 'temperatureMax'].forEach(key => {
+        if (isNaN(apiData[key])) delete apiData[key];
+      });
+      if (!apiData.scheduledPickupTime) delete apiData.scheduledPickupTime;
+      if (!apiData.scheduledDeliveryTime) delete apiData.scheduledDeliveryTime;
+      
+      shipmentMutation.mutate({ id: _id, formData: apiData });
+  };
+  const handleSaveCheckIn = () => { if (!currentShipment) return; if (!checkInFormData.notes) { toast.error("Notes are required."); return;} addCheckInMutation.mutate({ shipmentId: currentShipment._id, checkInData: {...checkInFormData, dateTime: new Date(checkInFormData.dateTime).toISOString()} });};
+  const handleGenerateEmail = (shipment: Shipment) => { setCurrentShipment(shipment); generateEmailMutation.mutate(shipment._id);};
+
+  const getStatusColor = (status: string | undefined): "default" | "primary"| "secondary" | "warning" | "info" | "success" | "error" => { /* ... */ 
+      switch (status) {
+        case 'quote': return 'default';
+        case 'pending': return 'warning';
+        case 'booked': case 'dispatched': case 'at_pickup': case 'in_transit_origin_drayage': case 'at_origin_port_ramp': case 'in_transit_main_leg': case 'at_destination_port_ramp': case 'in_transit_destination_drayage': case 'at_delivery': return 'info';
+        case 'picked_up': case 'delivered': case 'pod_received': return 'success';
+        case 'invoiced': return 'primary'; 
+        case 'paid': return 'secondary'; // MUI doesn't have a 'paid' color, so using secondary
+        case 'cancelled': case 'on_hold': case 'problem': return 'error';
+        default: return 'default';
+      }
+  };
+  const getDisplayName = (entity: ShipperStub | CarrierStub | string | null | undefined): string => { /* ... */ 
+    if (!entity) return 'N/A';
+    if (typeof entity === 'string') { 
+      const shipper = shippersList.find(s => s._id === entity); if (shipper) return shipper.name;
+      const carrier = carriersList.find(c => c._id === entity); if (carrier) return carrier.name;
+      return `ID: ${entity.substring(0, 8)}...`;
+    }
+    return entity.name || 'Unknown'; 
+  };
+
+
+  if (isLoadingShipments || isLoadingShippers || isLoadingCarriers || isLoadingEquipmentTypes) {
+    return <Box sx={{p:3, textAlign:'center', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}><CircularProgress /></Box>;
+  }
+  if (isErrorShipments) { 
+    return <Alert severity="error">Error fetching shipments: {(errorShipments as any)?.response?.data?.message || (errorShipments as any)?.message || 'Unknown error'}</Alert>;
+  }
+
+  return (
+    <Box> {/* Main Page Box */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h4">Shipments</Typography>
+        <Box display="flex" alignItems="center">
+            <TextField
+                label="Global Search"
+                variant="outlined"
+                size="small"
+                value={searchTermInput}
+                onChange={(e) => setSearchTermInput(e.target.value)}
+                sx={{ mr: 2, minWidth: 300 }}
+                InputProps={{ startAdornment: (<InputAdornment position="start"><SearchIcon /></InputAdornment>), }}
+            />
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpenShipmentForm()}> New Shipment </Button>
+        </Box>
+      </Box>
+
+      <TableContainer component={Paper}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{minWidth: 120}}>Shipment #</TableCell>
+              <TableCell sx={{minWidth: 150}}>Mode</TableCell>
+              <TableCell sx={{minWidth: 150}}>Shipper</TableCell>
+              <TableCell sx={{minWidth: 150}}>Carrier</TableCell>
+              <TableCell sx={{minWidth: 180}}>Origin → Dest.</TableCell>
+              <TableCell sx={{minWidth: 120}}>Status</TableCell>
+              <TableCell sx={{minWidth: 100}}>Pickup</TableCell>
+              <TableCell sx={{minWidth: 100}}>Delivery</TableCell>
+              <TableCell sx={{minWidth: 120}}>Container #</TableCell>
+              <TableCell sx={{minWidth: 120}}>PRO #</TableCell>
+              <TableCell align="center" sx={{minWidth: 150}}>Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {shipments && shipments.length > 0 ? (
+              shipments.map((shipment) => (
+                <TableRow hover key={shipment._id}>
+                  <TableCell>{shipment.shipmentNumber || 'N/A'}</TableCell>
+                  <TableCell sx={{textTransform: 'capitalize'}}>{shipment.modeOfTransport?.replace(/-/g, ' ') || 'N/A'}</TableCell>
+                  <TableCell>{getDisplayName(shipment.shipper)}</TableCell>
+                  <TableCell>{getDisplayName(shipment.carrier)}</TableCell>
+                  <TableCell>{shipment.origin?.city || 'N/A'} → {shipment.destination?.city || 'N/A'}</TableCell>
+                  <TableCell><Chip label={shipment.status?.replace(/_/g, ' ') || 'N/A'} color={getStatusColor(shipment.status)} size="small" sx={{textTransform: 'capitalize'}} /></TableCell>
+                  <TableCell>{shipment.scheduledPickupDate ? new Date(shipment.scheduledPickupDate).toLocaleDateString() : 'N/A'}</TableCell>
+                  <TableCell>{shipment.scheduledDeliveryDate ? new Date(shipment.scheduledDeliveryDate).toLocaleDateString() : 'N/A'}</TableCell>
+                  <TableCell>{shipment.containerNumber || 'N/A'}</TableCell>
+                  <TableCell>{shipment.proNumber || 'N/A'}</TableCell>
+                  <TableCell align="center">
+                    <Tooltip title="Add Check-in"><IconButton size="small" onClick={() => handleOpenCheckInForm(shipment)}><CheckIcon fontSize="inherit"/></IconButton></Tooltip>
+                    <Tooltip title="Generate Email"><IconButton size="small" onClick={() => handleGenerateEmail(shipment)} disabled={generateEmailMutation.isLoading && generateEmailMutation.variables === shipment._id}><EmailIcon fontSize="inherit"/></IconButton></Tooltip>
+                    <Tooltip title="View Details"><IconButton size="small" onClick={() => handleOpenDetailView(shipment)}><ViewIcon fontSize="inherit"/></IconButton></Tooltip>
+                    <Tooltip title="Edit Shipment"><IconButton size="small" onClick={() => handleOpenShipmentForm(shipment)}><EditIcon fontSize="inherit"/></IconButton></Tooltip>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow><TableCell colSpan={11} align="center">{isLoadingShipments? "Loading..." : "No shipments found."}</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/* Shipment Create/Edit Dialog */}
+      <Dialog open={isShipmentFormOpen} onClose={handleCloseShipmentForm} maxWidth="lg" fullWidth PaperProps={{ sx: { maxHeight: '90vh' } }}>
+        <DialogTitle>{shipmentFormData._id ? 'Edit Shipment' : 'New Shipment'}: {shipmentFormData.shipmentNumber || '(New)'}</DialogTitle>
+        <DialogContent dividers>
+          <Grid container spacing={2} sx={{ mt: 0.1 }}>
+            {/* Section 1: Core Info */}
+            <Grid item xs={12}><Typography variant="overline">Core Information</Typography><Divider /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Shipment Number" name="shipmentNumber" value={shipmentFormData.shipmentNumber} onChange={handleShipmentFormInputChange} helperText="Auto-generated if new & empty" /></Grid>
+            <Grid item xs={12} sm={6} md={3}>
+                <TextField size="small" select fullWidth label="Mode of Transport" name="modeOfTransport" value={shipmentFormData.modeOfTransport} 
+                           onChange={(e) => handleShipmentFormSelectChange('modeOfTransport', e.target.value as ModeOfTransportType)} required>
+                    {modeOfTransportOptions.map(mode => <MenuItem key={mode} value={mode} sx={{textTransform: 'capitalize'}}>{mode.replace(/-/g, ' ')}</MenuItem>)}
+                </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+                <TextField size="small" select fullWidth label="Status" name="status" value={shipmentFormData.status} 
+                           onChange={(e) => handleShipmentFormSelectChange('status', e.target.value as StatusType)} required>
+                    {statusOptions.map(s => <MenuItem key={s} value={s} sx={{textTransform: 'capitalize'}}>{s.replace(/_/g, ' ')}</MenuItem>)}
+                </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" select fullWidth label="Equipment Type" name="equipmentType" value={shipmentFormData.equipmentType} onChange={(e) => handleShipmentFormSelectChange('equipmentType', e.target.value)} required disabled={isLoadingEquipmentTypes}>
+                {isLoadingEquipmentTypes ? <MenuItem value=""><em>Loading...</em></MenuItem> : equipmentTypesList.length === 0 ? <MenuItem value=""><em>No equipment</em></MenuItem> : equipmentTypesList.map(eq => <MenuItem key={eq._id} value={eq.name}>{eq.name}</MenuItem>)}
+            </TextField></Grid>
+            <Grid item xs={12} sm={6} md={6}><TextField size="small" select fullWidth label="Shipper" name="shipper" value={shipmentFormData.shipper} onChange={(e) => handleShipmentFormSelectChange('shipper', e.target.value)} required disabled={isLoadingShippers}>
+                {isLoadingShippers? <MenuItem value=""><em>Loading...</em></MenuItem> : shippersList.map(s => <MenuItem key={s._id} value={s._id}>{s.name}</MenuItem>)}
+            </TextField></Grid>
+            <Grid item xs={12} sm={6} md={6}><TextField size="small" select fullWidth label="Carrier" name="carrier" value={shipmentFormData.carrier} onChange={(e) => handleShipmentFormSelectChange('carrier', e.target.value)} required disabled={isLoadingCarriers}>
+                {isLoadingCarriers? <MenuItem value=""><em>Loading...</em></MenuItem> : carriersList.map(c => <MenuItem key={c._id} value={c._id}>{c.name}</MenuItem>)}
+            </TextField></Grid>
+            
+            {/* Section 2: Dates & Times */}
+            <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Dates & Times</Typography><Divider/></Grid>
+            <Grid item xs={6} sm={4} md={2}><TextField size="small" fullWidth label="Sched. Pickup Date" name="scheduledPickupDate" type="date" value={shipmentFormData.scheduledPickupDate} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} required /></Grid>
+            <Grid item xs={6} sm={2} md={1}><TextField size="small" fullWidth label="Time" name="scheduledPickupTime" value={shipmentFormData.scheduledPickupTime} onChange={handleShipmentFormInputChange} placeholder="HH:MM or window" /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Actual Pickup D/T" name="actualPickupDateTime" type="datetime-local" value={shipmentFormData.actualPickupDateTime} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><TextField size="small" fullWidth label="Sched. Delivery Date" name="scheduledDeliveryDate" type="date" value={shipmentFormData.scheduledDeliveryDate} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} required /></Grid>
+            <Grid item xs={6} sm={2} md={1}><TextField size="small" fullWidth label="Time" name="scheduledDeliveryTime" value={shipmentFormData.scheduledDeliveryTime} onChange={handleShipmentFormInputChange} placeholder="HH:MM or window" /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Actual Delivery D/T" name="actualDeliveryDateTime" type="datetime-local" value={shipmentFormData.actualDeliveryDateTime} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+            
+            {/* Section 3: Locations */}
+            <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Locations</Typography><Divider/></Grid>
+            <Grid item xs={12} md={6}> {/* Origin Group */}
+                <Typography variant="caption" display="block" gutterBottom>Origin Details</Typography>
+                <Grid container spacing={1}>
+                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Name (Opt.)" name="originName" value={shipmentFormData.originName} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}><TextField size="small" select fullWidth label="Origin Location Type" name="originLocationType" value={shipmentFormData.originLocationType} onChange={(e) => handleShipmentFormSelectChange('originLocationType', e.target.value as LocationType )}>
+                        {locationTypeOptions.map(lt=><MenuItem key={`orig-${lt}`} value={lt} sx={{textTransform:'capitalize'}}>{lt.replace(/_/g, ' ')}</MenuItem>)}
+                    </TextField></Grid>
+                    <Grid item xs={12}><TextField size="small" fullWidth label="Origin Address" name="originAddress" value={shipmentFormData.originAddress} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={4}><TextField size="small" fullWidth label="Origin City" name="originCity" value={shipmentFormData.originCity} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={2}><TextField size="small" fullWidth label="Origin State" name="originState" value={shipmentFormData.originState} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label="Origin Zip" name="originZip" value={shipmentFormData.originZip} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label="Origin Country" name="originCountry" value={shipmentFormData.originCountry} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Contact Name" name="originContactName" value={shipmentFormData.originContactName} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Contact Phone" name="originContactPhone" value={shipmentFormData.originContactPhone} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12}><TextField size="small" fullWidth label="Origin Notes" name="originNotes" value={shipmentFormData.originNotes} onChange={handleShipmentFormInputChange} multiline minRows={1}/> </Grid>
+                </Grid>
+            </Grid>
+            <Grid item xs={12} md={6}> {/* Destination Group */}
+                <Typography variant="caption" display="block" gutterBottom>Destination Details</Typography>
+                 <Grid container spacing={1}>
+                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Name (Opt.)" name="destinationName" value={shipmentFormData.destinationName} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}><TextField size="small" select fullWidth label="Dest. Location Type" name="destinationLocationType" value={shipmentFormData.destinationLocationType} onChange={(e) => handleShipmentFormSelectChange('destinationLocationType', e.target.value as LocationType)}>
+                         {locationTypeOptions.map(lt=><MenuItem key={`dest-${lt}`} value={lt} sx={{textTransform:'capitalize'}}>{lt.replace(/_/g, ' ')}</MenuItem>)}
+                    </TextField></Grid>
+                    <Grid item xs={12}><TextField size="small" fullWidth label="Dest. Address" name="destinationAddress" value={shipmentFormData.destinationAddress} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={4}><TextField size="small" fullWidth label="Dest. City" name="destinationCity" value={shipmentFormData.destinationCity} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={2}><TextField size="small" fullWidth label="Dest. State" name="destinationState" value={shipmentFormData.destinationState} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label="Dest. Zip" name="destinationZip" value={shipmentFormData.destinationZip} onChange={handleShipmentFormInputChange} required /></Grid>
+                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label="Dest. Country" name="destinationCountry" value={shipmentFormData.destinationCountry} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Contact Name" name="destinationContactName" value={shipmentFormData.destinationContactName} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Contact Phone" name="destinationContactPhone" value={shipmentFormData.destinationContactPhone} onChange={handleShipmentFormInputChange} /></Grid>
+                    <Grid item xs={12}><TextField size="small" fullWidth label="Dest. Notes" name="destinationNotes" value={shipmentFormData.destinationNotes} onChange={handleShipmentFormInputChange} multiline minRows={1} /></Grid>
+                </Grid>
+            </Grid>
+
+            {/* Section 4: Freight Details */}
+            <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Freight Details</Typography><Divider/></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Commodity Description" name="commodityDescription" value={shipmentFormData.commodityDescription} onChange={handleShipmentFormInputChange} required /></Grid>
+            <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Piece Count" name="pieceCount" type="number" value={shipmentFormData.pieceCount} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Package Type" name="packageType" value={shipmentFormData.packageType} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Total Weight" name="totalWeight" type="number" value={shipmentFormData.totalWeight} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={6} sm={3} md={2}><TextField size="small" select fullWidth label="Weight Unit" name="weightUnit" value={shipmentFormData.weightUnit} onChange={(e) => handleShipmentFormSelectChange('weightUnit', e.target.value as WeightUnitType)}>
+                {weightUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)}
+            </TextField></Grid>
+            <Grid item xs={12} sm={4} md={2}><TextField size="small" fullWidth label="Equip. Length" name="equipmentLength" type="number" value={shipmentFormData.equipmentLength} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={12} sm={4} md={2}><TextField size="small" select fullWidth label="Equip. Unit" name="equipmentUnit" value={shipmentFormData.equipmentUnit} onChange={(e) => handleShipmentFormSelectChange('equipmentUnit', e.target.value as EquipmentUnitType)}>
+                {equipmentUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)}
+            </TextField></Grid>
+            <Grid item xs={12} sm={4} md={2}><FormControlLabel control={<Checkbox checked={shipmentFormData.isHazardous} onChange={handleShipmentFormInputChange} name="isHazardous" size="small" />} label="Hazardous" /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="UN Number" name="unNumber" value={shipmentFormData.unNumber} onChange={handleShipmentFormInputChange} disabled={!shipmentFormData.isHazardous} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Hazmat Class" name="hazmatClass" value={shipmentFormData.hazmatClass} onChange={handleShipmentFormInputChange} disabled={!shipmentFormData.isHazardous} /></Grid>
+            <Grid item xs={12} sm={4} md={2}><FormControlLabel control={<Checkbox checked={shipmentFormData.isTemperatureControlled} onChange={handleShipmentFormInputChange} name="isTemperatureControlled" size="small" />} label="Temp Control" /></Grid>
+            <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Min Temp" name="temperatureMin" type="number" value={shipmentFormData.temperatureMin} onChange={handleShipmentFormInputChange} disabled={!shipmentFormData.isTemperatureControlled} /></Grid>
+            <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Max Temp" name="temperatureMax" type="number" value={shipmentFormData.temperatureMax} onChange={handleShipmentFormInputChange} disabled={!shipmentFormData.isTemperatureControlled} /></Grid>
+            <Grid item xs={12} sm={4} md={2}><TextField size="small" select fullWidth label="Temp Unit" name="tempUnit" value={shipmentFormData.tempUnit} onChange={(e) => handleShipmentFormSelectChange('tempUnit', e.target.value as TempUnitType)} disabled={!shipmentFormData.isTemperatureControlled} >
+                <MenuItem value="C">°C</MenuItem><MenuItem value="F">°F</MenuItem>
+            </TextField></Grid>
+
+            {/* Section 5: Reference Numbers */}
+            <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Reference Numbers</Typography><Divider/></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="BOL #" name="billOfLadingNumber" value={shipmentFormData.billOfLadingNumber} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <BOLIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="PRO #" name="proNumber" value={shipmentFormData.proNumber} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="DO #" name="deliveryOrderNumber" value={shipmentFormData.deliveryOrderNumber} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <DONumberIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Booking #" name="bookingNumber" value={shipmentFormData.bookingNumber} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <BookingIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Container #" name="containerNumber" value={shipmentFormData.containerNumber} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <ContainerIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Seal #" name="sealNumber" value={shipmentFormData.sealNumber} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <SealIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Pickup #" name="pickupNumber" value={shipmentFormData.pickupNumber} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="POD Ref #" name="proofOfDeliveryNumber" value={shipmentFormData.proofOfDeliveryNumber} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="PO #s (comma-sep)" name="purchaseOrderNumbers" value={shipmentFormData.purchaseOrderNumbers} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <PONumberIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+            <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Other Refs (type:value,...)" name="otherReferenceNumbersString" value={shipmentFormData.otherReferenceNumbersString} onChange={handleShipmentFormInputChange} InputProps={{startAdornment: <GenericRefIcon fontSize="small" sx={{mr:0.5}}/>}} /></Grid>
+
+            {/* Conditional Sections based on Mode of Transport */}
+            {(shipmentFormData.modeOfTransport.includes('drayage') || shipmentFormData.modeOfTransport.includes('intermodal') || shipmentFormData.modeOfTransport.includes('ocean')) && (
+              <>
+                <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Drayage / Port / Vessel / Ocean</Typography><Divider/></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Steamship Line" name="steamshipLine" value={shipmentFormData.steamshipLine} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Vessel Name" name="vesselName" value={shipmentFormData.vesselName} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Voyage #" name="voyageNumber" value={shipmentFormData.voyageNumber} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Terminal" name="terminal" value={shipmentFormData.terminal} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="LFD @ Port" name="lastFreeDayPort" type="date" value={shipmentFormData.lastFreeDayPort} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Empty Return Depot" name="emptyReturnDepot" value={shipmentFormData.emptyReturnDepot} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Empty Return By" name="emptyContainerReturnByDate" type="date" value={shipmentFormData.emptyContainerReturnByDate} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Chassis #" name="chassisNumber" value={shipmentFormData.chassisNumber} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Chassis Type" name="chassisType" value={shipmentFormData.chassisType} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Chassis Provider" name="chassisProvider" value={shipmentFormData.chassisProvider} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Chassis Return By" name="chassisReturnByDate" type="date" value={shipmentFormData.chassisReturnByDate} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Pickup Appt #" name="pickupAppointmentNumber" value={shipmentFormData.pickupAppointmentNumber} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Delivery Appt #" name="deliveryAppointmentNumber" value={shipmentFormData.deliveryAppointmentNumber} onChange={handleShipmentFormInputChange} /></Grid>
+              </>
+            )}
+
+            {shipmentFormData.modeOfTransport.includes('rail') && (
+              <>
+                <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Rail Details</Typography><Divider/></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Rail Origin Ramp" name="railOriginRamp" value={shipmentFormData.railOriginRamp} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Rail Dest. Ramp" name="railDestinationRamp" value={shipmentFormData.railDestinationRamp} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Rail Carrier" name="railCarrier" value={shipmentFormData.railCarrier} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="LFD @ Rail" name="lastFreeDayRail" type="date" value={shipmentFormData.lastFreeDayRail} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+              </>
+            )}
+
+            {shipmentFormData.modeOfTransport.includes('air') && (
+              <>
+                <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Air Freight Details</Typography><Divider/></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Airline" name="airline" value={shipmentFormData.airline} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Flight #" name="flightNumber" value={shipmentFormData.flightNumber} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="MAWB #" name="masterAirWaybill" value={shipmentFormData.masterAirWaybill} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="HAWB #" name="houseAirWaybill" value={shipmentFormData.houseAirWaybill} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={6}><TextField size="small" fullWidth label="Airport of Departure (IATA)" name="airportOfDeparture" value={shipmentFormData.airportOfDeparture} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={6}><TextField size="small" fullWidth label="Airport of Arrival (IATA)" name="airportOfArrival" value={shipmentFormData.airportOfArrival} onChange={handleShipmentFormInputChange} /></Grid>
+              </>
+            )}
+            
+            <Grid item xs={12}><FormControlLabel control={<Checkbox checked={shipmentFormData.isTransload} onChange={handleShipmentFormInputChange} name="isTransload" size="small"/>} label="Transload Required" /></Grid>
+            {shipmentFormData.isTransload && (
+                <>
+                <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Transload Details</Typography><Divider/></Grid>
+                <Grid item xs={12} sm={6} md={4}><TextField size="small" fullWidth label="Transload Facility Name" name="transloadFacilityName" value={shipmentFormData.transloadFacilityName} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={6} md={4}><TextField size="small" fullWidth label="Transload Date" name="transloadDate" type="date" value={shipmentFormData.transloadDate} onChange={handleShipmentFormInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+                <Grid item xs={12} sm={8} md={4}><TextField size="small" fullWidth label="Transload Facility Address" name="transloadFacilityAddress" value={shipmentFormData.transloadFacilityAddress} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={5} md={4}><TextField size="small" fullWidth label="Facility City" name="transloadFacilityCity" value={shipmentFormData.transloadFacilityCity} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={3} md={4}><TextField size="small" fullWidth label="Facility State" name="transloadFacilityState" value={shipmentFormData.transloadFacilityState} onChange={handleShipmentFormInputChange} /></Grid>
+                <Grid item xs={12} sm={4} md={4}><TextField size="small" fullWidth label="Facility Zip" name="transloadFacilityZip" value={shipmentFormData.transloadFacilityZip} onChange={handleShipmentFormInputChange} /></Grid>
+              </>
+            )}
+
+            <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Financials & Notes</Typography><Divider/></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Customer Rate ($)" name="customerRate" type="number" value={shipmentFormData.customerRate} onChange={handleShipmentFormInputChange} required /></Grid>
+            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Carrier Cost ($)" name="carrierCostTotal" type="number" value={shipmentFormData.carrierCostTotal} onChange={handleShipmentFormInputChange} required /></Grid>
+            <Grid item xs={12} sm={6} md={6}><TextField size="small" fullWidth label="Custom Tags (comma-sep)" name="customTags" value={shipmentFormData.customTags} onChange={handleShipmentFormInputChange} /></Grid>
+            <Grid item xs={12}><TextField size="small" fullWidth label="Internal Notes" name="internalNotes" value={shipmentFormData.internalNotes} onChange={handleShipmentFormInputChange} multiline minRows={2} /></Grid>
+            <Grid item xs={12}><TextField size="small" fullWidth label="Special Instructions (for carrier)" name="specialInstructions" value={shipmentFormData.specialInstructions} onChange={handleShipmentFormInputChange} multiline minRows={2} /></Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseShipmentForm}>Cancel</Button>
+          <Button onClick={handleSaveShipment} variant="contained" disabled={shipmentMutation.isLoading}>
+            {shipmentMutation.isLoading ? <CircularProgress size={24} /> : (shipmentFormData._id ? 'Update Shipment' : 'Save Shipment')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Check-in Dialog */}
+      <Dialog open={isCheckInFormOpen} onClose={handleCloseCheckInForm} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Check-in for {currentShipment?.shipmentNumber || ''}</DialogTitle>
+        <DialogContent>
+          <Grid container spacing={2} sx={{mt:1}}>
+             <Grid item xs={12} sm={6}><TextField fullWidth label="Date/Time" name="dateTime" type="datetime-local" value={checkInFormData.dateTime ? formatDateTimeForInput(checkInFormData.dateTime as string) : ''} onChange={handleCheckInFormInputChange} InputLabelProps={{ shrink: true }} required/></Grid>
+            <Grid item xs={12} sm={6}><TextField select fullWidth label="Method" name="method" value={checkInFormData.method} onChange={(e) => handleCheckInFormSelectChange('method', e.target.value)}>
+                <MenuItem value="email">Email</MenuItem><MenuItem value="phone">Phone</MenuItem><MenuItem value="text">Text</MenuItem>
+                <MenuItem value="api">API</MenuItem><MenuItem value="portal">Portal</MenuItem><MenuItem value="edi">EDI</MenuItem>
+              </TextField></Grid>
+            <Grid item xs={12} sm={6}><TextField fullWidth label="Contact Person/Details" name="contactPerson" value={checkInFormData.contactPerson || ''} onChange={handleCheckInFormInputChange} /></Grid>
+            <Grid item xs={12} sm={6}><TextField fullWidth label="Location Update" name="currentLocation" value={checkInFormData.currentLocation || ''} onChange={handleCheckInFormInputChange} /></Grid>
+            <Grid item xs={12}> <TextField select fullWidth label="Associated Status Update (Optional)" name="statusUpdate" value={checkInFormData.statusUpdate || ''} onChange={(e) => handleCheckInFormSelectChange('statusUpdate', e.target.value as CheckInFormData['statusUpdate'])}>
+                <MenuItem value=""><em>No Status Change</em></MenuItem>
+                {statusOptions.map(s => <MenuItem key={`stat-${s}`} value={s} sx={{textTransform: 'capitalize'}}>{s.replace(/_/g, ' ')}</MenuItem>)}
+            </TextField></Grid>
+            <Grid item xs={12}><TextField fullWidth label="Notes" name="notes" value={checkInFormData.notes} onChange={handleCheckInFormInputChange} multiline rows={4} required/></Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions><Button onClick={handleCloseCheckInForm}>Cancel</Button><Button onClick={handleSaveCheckIn} variant="contained" disabled={addCheckInMutation.isLoading}>{addCheckInMutation.isLoading ? <CircularProgress size={24} /> : 'Save Check-in'}</Button></DialogActions>
+      </Dialog>
+
+      {/* Email Gen Dialog */}
+      <Dialog open={isEmailGenOpen} onClose={handleCloseEmailGen} maxWidth="md" fullWidth>
+        <DialogTitle>Generated Email for {currentShipment?.shipmentNumber || ''}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" gutterBottom><strong>To:</strong> {typeof currentShipment?.shipper === 'object' ? currentShipment?.shipper?.contact?.email || currentShipment?.shipper?.name : 'Shipper Contact'}</Typography>
+          <Typography variant="body2" gutterBottom><strong>Subject:</strong> Status Update: Shipment {currentShipment?.shipmentNumber}</Typography>
+          <Paper variant="outlined" sx={{p:2, mt:1, whiteSpace: 'pre-wrap', maxHeight: '60vh', overflowY: 'auto', fontFamily: 'monospace', fontSize: '0.85rem', lineHeight: '1.4' }}>
+            {generatedEmailContent || "No content generated."}
+          </Paper>
+        </DialogContent>
+        <DialogActions><Button onClick={handleCloseEmailGen}>Close</Button></DialogActions>
+      </Dialog>
+
+      {/* Detail View Dialog */}
+       {currentShipment && isDetailViewOpen && (
+        <Dialog open={isDetailViewOpen} onClose={handleCloseDetailView} maxWidth="lg" fullWidth PaperProps={{ sx: { maxHeight: '90vh' } }}>
+            <DialogTitle>Shipment Details: {currentShipment.shipmentNumber}</DialogTitle>
+            <DialogContent dividers>
+                <Grid container spacing={1} sx={{fontSize: '0.9rem'}}>
+                    <Grid item xs={12} sm={6} md={3}><Typography><strong>Mode:</strong> {currentShipment.modeOfTransport?.replace(/-/g,' ')}</Typography></Grid>
+                    <Grid item xs={12} sm={6} md={3}><Typography><strong>Status:</strong> {currentShipment.status?.replace(/_/g,' ')}</Typography></Grid>
+                    <Grid item xs={12} sm={6} md={3}><Typography><strong>Equipment:</strong> {currentShipment.equipmentType}</Typography></Grid>
+                    <Grid item xs={12} sm={6} md={3}><Typography><strong>Commodity:</strong> {currentShipment.commodityDescription}</Typography></Grid>
+                    
+                    <Grid item xs={12}><Divider sx={{my:1}}><Chip label="Parties"/></Divider></Grid>
+                    <Grid item xs={12} sm={6}><Typography><strong>Shipper:</strong> {getDisplayName(currentShipment.shipper)}</Typography></Grid>
+                    <Grid item xs={12} sm={6}><Typography><strong>Carrier:</strong> {getDisplayName(currentShipment.carrier)}</Typography></Grid>
+                    
+                    <Grid item xs={12}><Divider sx={{my:1}}><Chip label="References"/></Divider></Grid>
+                    <Grid item xs={6} sm={4} md={3}><Typography><strong>BOL #:</strong> {currentShipment.billOfLadingNumber || 'N/A'}</Typography></Grid>
+                    <Grid item xs={6} sm={4} md={3}><Typography><strong>PRO #:</strong> {currentShipment.proNumber || 'N/A'}</Typography></Grid>
+                    <Grid item xs={6} sm={4} md={3}><Typography><strong>Container #:</strong> {currentShipment.containerNumber || 'N/A'}</Typography></Grid>
+                    <Grid item xs={6} sm={4} md={3}><Typography><strong>Booking #:</strong> {currentShipment.bookingNumber || 'N/A'}</Typography></Grid>
+                    <Grid item xs={12}><Typography><strong>PO(s):</strong> {currentShipment.purchaseOrderNumbers?.join(', ') || 'N/A'}</Typography></Grid>
+                    {currentShipment.otherReferenceNumbers && currentShipment.otherReferenceNumbers.length > 0 &&
+                        <Grid item xs={12}><Typography><strong>Other Refs:</strong> {currentShipment.otherReferenceNumbers.map(r => `${r.type}:${r.value}`).join(', ')}</Typography></Grid>
+                    }
+                </Grid>
+                 <Divider sx={{my:2}}/>
+                {(currentShipment.modeOfTransport?.includes('drayage') || currentShipment.modeOfTransport?.includes('intermodal') || currentShipment.modeOfTransport?.includes('ocean')) && (
+                    <Box mt={1}> <Typography variant="subtitle2">Drayage/Port/Ocean Info</Typography> {/* Expand this */} </Box>
+                )}
+                 {currentShipment.modeOfTransport?.includes('rail') && (
+                    <Box mt={1}> <Typography variant="subtitle2">Rail Info</Typography> {/* Expand this */} </Box>
+                )}
+                {currentShipment.modeOfTransport?.includes('air') && (
+                    <Box mt={1}> <Typography variant="subtitle2">Air Info</Typography> {/* Expand this */} </Box>
+                )}
+                 {currentShipment.isTransload && (
+                    <Box mt={1}> <Typography variant="subtitle2">Transload Info</Typography> {/* Expand this */} </Box>
+                )}
+                 <Divider sx={{my:2}}/>
+                 <Typography variant="h6" sx={{mt:2}}>Check-ins:</Typography>
+                    {currentShipment.checkIns && currentShipment.checkIns.length > 0 ? (
+                        currentShipment.checkIns.map((ci, index) => (
+                            <Paper elevation={1} sx={{p:1, mb:1, fontSize: '0.85rem'}} key={ci._id || index}>
+                                <Typography variant="body2"><strong>Date:</strong> {ci.dateTime ? new Date(ci.dateTime).toLocaleString() : 'N/A'}</Typography>
+                                <Typography variant="body2"><strong>Method:</strong> {ci.method}</Typography>
+                                <Typography variant="body2"><strong>Contact:</strong> {ci.contactPerson || 'N/A'}</Typography>
+                                <Typography variant="body2"><strong>Location:</strong> {ci.currentLocation || 'N/A'}</Typography>
+                                <Typography variant="body2"><strong>Notes:</strong> {ci.notes}</Typography>
+                                {ci.statusUpdate && <Typography variant="body2"><strong>Status Set To:</strong> {ci.statusUpdate.replace(/_/g,' ')}</Typography>}
+                            </Paper>
+                        ))
+                    ) : <Typography sx={{mt:1}}>No check-ins recorded.</Typography>}
+            </DialogContent>
+            <DialogActions><Button onClick={handleCloseDetailView}>Close</Button></DialogActions>
+        </Dialog>
+       )}
+    </Box> // End Main Page Box
+  );
+};
+
+export default Shipments;
