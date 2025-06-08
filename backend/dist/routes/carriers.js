@@ -11,8 +11,8 @@ router.get('/', carrierController.getCarriers);
 router.post('/', carrierController.createCarrier);
 router.get('/:id', carrierController.getCarrierById);
 router.post('/:id/safer-update', carrierController.updateSaferDataForCarrier);
-// router.put('/:id', carrierController.updateCarrier);       // Placeholder for update
-// router.delete('/:id', carrierController.deleteCarrier);   // Placeholder for delete
+router.put('/:id', carrierController.updateCarrier); // Placeholder for update
+router.delete('/:id', carrierController.deleteCarrier); // Placeholder for delete
 // Fallback for any other methods on /:id or /
 router.all('/:id', (req, res) => res.status(405).json({ message: 'Method Not Allowed on this carrier resource.' }));
 router.all('/', (req, res) => res.status(405).json({ message: 'Method Not Allowed on /carriers.' }));

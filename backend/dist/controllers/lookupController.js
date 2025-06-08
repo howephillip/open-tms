@@ -2,13 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.LookupController = void 0;
 const EquipmentType_1 = require("../models/EquipmentType");
-const AccessorialType_1 = require("../models/AccessorialType");
-// Import other lookup models here as you create them
-// e.g., import { ModeOfTransport } from '../models/ModeOfTransport';
+const AccessorialType_1 = require("../models/AccessorialType"); // Ensure this is imported
 const logger_1 = require("../utils/logger");
 class LookupController {
     async getEquipmentTypes(req, res) {
-        logger_1.logger.info('Fetching equipment types. Query params:', req.query);
+        logger_1.logger.info('Fetching equipment types for lookup. Query params:', req.query);
         try {
             const { category } = req.query;
             const query = { isActive: true };
@@ -20,41 +18,44 @@ class LookupController {
                 success: true,
                 message: "Equipment types fetched successfully",
                 data: {
-                    equipmentTypes // Frontend expects { data: { equipmentTypes: [...] } }
+                    equipmentTypes
                 }
             });
         }
         catch (error) {
-            logger_1.logger.error('Error fetching equipment types:', { message: error.message, stack: error.stack });
+            logger_1.logger.error('Error fetching equipment types for lookup:', { message: error.message, stack: error.stack });
             res.status(500).json({ success: false, message: 'Error fetching equipment types', errorDetails: error.message });
         }
     }
     async getAccessorialTypes(req, res) {
-        logger_1.logger.info('Fetching accessorial types. Query params:', req.query);
+        logger_1.logger.info('Fetching accessorial types for lookup. Query params:', req.query);
         try {
             const { mode, category } = req.query;
             const query = { isActive: true };
             if (mode && typeof mode === 'string') {
-                query.appliesToModes = mode; // Check if mode is IN the appliesToModes array
+                query.appliesToModes = mode;
             }
             if (category && typeof category === 'string') {
                 query.category = category;
             }
-            const accessorialTypes = await AccessorialType_1.AccessorialType.find(query).sort({ category: 1, name: 1 }).lean();
+            const accessorialTypes = await AccessorialType_1.AccessorialType.find(query)
+                .sort({ category: 1, name: 1 })
+                .select('name code defaultCustomerRate defaultCarrierCost isPerUnit unitName category appliesToModes') // Ensure all needed fields are selected
+                .lean();
+            logger_1.logger.info(`Fetched ${accessorialTypes.length} accessorial types for lookup.`);
             res.status(200).json({
                 success: true,
-                message: "Accessorial types fetched successfully",
+                message: "Accessorial types fetched successfully for lookup.",
                 data: {
-                    accessorialTypes // Frontend expects { data: { accessorialTypes: [...] } }
+                    accessorialTypes
                 }
             });
         }
         catch (error) {
-            logger_1.logger.error('Error fetching accessorial types:', { message: error.message, stack: error.stack });
-            res.status(500).json({ success: false, message: 'Error fetching accessorial types', errorDetails: error.message });
+            logger_1.logger.error('Error fetching accessorial types for lookup:', { message: error.message, stack: error.stack });
+            res.status(500).json({ success: false, message: 'Error fetching accessorial types for lookup', errorDetails: error.message });
         }
     }
-    // Example for a simple hardcoded list (if you don't want a DB model for everything)
     async getModeOfTransportOptions(req, res) {
         logger_1.logger.info('Fetching mode of transport options.');
         try {
@@ -63,11 +64,11 @@ class LookupController {
                 'intermodal-rail', 'ocean-fcl', 'ocean-lcl', 'air-freight',
                 'expedited-ground', 'final-mile', 'other'
             ];
-            const modeObjects = modes.map(m => ({ _id: m, name: m.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) })); // Create objects similar to DB fetched ones
+            const modeObjects = modes.map(m => ({ _id: m, name: m.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) }));
             res.status(200).json({
                 success: true,
                 message: "Mode of transport options fetched successfully",
-                data: { modesOfTransport: modeObjects } // Frontend might expect "modesOfTransport" key
+                data: { modesOfTransport: modeObjects }
             });
         }
         catch (error) {

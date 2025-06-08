@@ -4,5 +4,6 @@ export declare class ShipperController {
     createShipper(req: Request, res: Response): Promise<void>;
     getShipperById(req: Request, res: Response): Promise<void>;
     updateShipper(req: Request, res: Response): Promise<void>;
+    deleteShipper(req: Request, res: Response): Promise<void>;
 }
 //# sourceMappingURL=shipperController.d.ts.map

@@ -2,17 +2,20 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs'; // IMPORTED fs
 
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') }); 
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 import { config } from '../config/database';
 import { User, IUser } from '../models/User';
 import { Shipper, IShipper } from '../models/Shipper';
 import { Carrier, ICarrier } from '../models/Carrier';
-import { Shipment, IShipment } from '../models/Shipment';
+import { Shipment, IShipment } from '../models/Shipment'; // Use named exports
 import { Document as DocModel, IDocument } from '../models/Document';
 import { EquipmentType, IEquipmentType } from '../models/EquipmentType';
-import { AccessorialType, IAccessorialType } from '../models/AccessorialType'; // IMPORTED
+import { AccessorialType, IAccessorialType } from '../models/AccessorialType';
+import { ApplicationSettings } from '../models/ApplicationSettings';
+import { LaneRate } from '../models/LaneRate';
 import { logger } from '../utils/logger';
 
 const connectDB = async () => {
@@ -33,32 +36,33 @@ const clearDatabase = async () => {
     await Shipment.deleteMany({});
     await DocModel.deleteMany({});
     await EquipmentType.deleteMany({});
-    await AccessorialType.deleteMany({}); // CLEAR ACCESSORIAL TYPES
+    await AccessorialType.deleteMany({});
+    await ApplicationSettings.deleteMany({});
+    await LaneRate.deleteMany({});
     logger.info('Database cleared.');
-  } catch (error: any) { // Added type for error
+  } catch (error: any) {
     logger.error('Error clearing database:', error);
-    throw error; // Re-throw to stop seeding if clearing fails
+    throw error;
   }
 };
 
 const seedUsers = async (): Promise<IUser[]> => {
-  const usersData = [
+  const usersData: Partial<IUser>[] = [
     { firstName: 'Admin', lastName: 'User', email: 'admin@example.com', password: 'password123', role: 'admin' as const },
     { firstName: 'Dispatch', lastName: 'Person', email: 'dispatch@example.com', password: 'password123', role: 'dispatcher' as const },
   ];
-  // Use try-catch for individual seed functions for better error isolation
   try {
     const users = await User.create(usersData);
     logger.info(`${users.length} users seeded.`);
     return users;
   } catch (error) {
     logger.error('Error seeding Users:', error);
-    return []; // Return empty or throw
+    return [];
   }
 };
 
 const seedShippers = async (): Promise<IShipper[]> => {
-  const shippersData: Partial<IShipper>[] = [ // Use Partial if not all required fields are provided directly
+  const shippersData: Partial<IShipper>[] = [
     { name: 'Global Goods Inc.', address: { street: '123 Commerce St', city: 'New York', state: 'NY', zip: '10001' }, contact: { name: 'Sarah Miller', phone: '212-555-0101', email: 'sarah.miller@globalgoods.com' }, billingInfo: { paymentTerms: 'Net 30', creditLimit: 50000, invoiceEmail: 'billing@globalgoods.com' }, industry: 'Retail Goods'},
     { name: 'Tech Parts Ltd.', address: { street: '456 Innovation Dr', city: 'San Francisco', state: 'CA', zip: '94107' }, contact: { name: 'John Doe', phone: '415-555-0202', email: 'john.doe@techparts.com' }, billingInfo: { paymentTerms: 'Net 15', creditLimit: 100000, invoiceEmail: 'ap@techparts.com' }, industry: 'Electronics'},
   ];
@@ -74,8 +78,8 @@ const seedShippers = async (): Promise<IShipper[]> => {
 
 const seedCarriers = async (): Promise<ICarrier[]> => {
   const carriersData: Partial<ICarrier>[] = [
-    { name: 'Speedy Freightways', mcNumber: '123456', dotNumber: '1122334', address: { street: '789 Logistics Ave', city: 'Chicago', state: 'IL', zip: '60607' }, contact: { name: 'Mike Brown', phone: '312-555-0303', email: 'mike.brown@speedyfreight.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Satisfactory', status: 'Authorized for Property'}, equipment: ['Dry Van', 'Reefer']},
-    { name: 'Reliable Transport', mcNumber: '654321', dotNumber: '4433221', address: { street: '321 Hauler Rd', city: 'Dallas', state: 'TX', zip: '75201' }, contact: { name: 'Laura Wilson', phone: '214-555-0404', email: 'laura.wilson@reliabletransport.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Conditional', status: 'Authorized for Property'}, equipment: ['Flatbed']},
+    { name: 'Speedy Freightways', mcNumber: '123456', dotNumber: '1122334', address: { street: '789 Logistics Ave', city: 'Chicago', state: 'IL', zip: '60607' }, contact: { name: 'Mike Brown', phone: '312-555-0303', email: 'mike.brown@speedyfreight.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Satisfactory', status: 'Authorized for Property', insuranceInfo: {}}, equipment: ['Dry Van', 'Reefer']},
+    { name: 'Reliable Transport', mcNumber: '654321', dotNumber: '4433221', address: { street: '321 Hauler Rd', city: 'Dallas', state: 'TX', zip: '75201' }, contact: { name: 'Laura Wilson', phone: '214-555-0404', email: 'laura.wilson@reliabletransport.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Conditional', status: 'Authorized for Property', insuranceInfo: {}}, equipment: ['Flatbed']},
   ];
   try {
     const carriers = await Carrier.create(carriersData);
@@ -145,7 +149,6 @@ const seedAccessorialTypes = async (): Promise<IAccessorialType[]> => {
   }
 };
 
-
 const seedShipments = async (shippers: IShipper[], carriers: ICarrier[], users: IUser[], equipmentTypes: IEquipmentType[]): Promise<IShipment[]> => {
   const adminUser = users.find(u => u.role === 'admin');
   if (!adminUser) { logger.error("Admin user not found. Aborting shipment seed."); return []; }
@@ -155,7 +158,7 @@ const seedShipments = async (shippers: IShipper[], carriers: ICarrier[], users: 
   }
 
   const shipmentsData: Partial<IShipment>[] = [
-    { // shipmentNumber will be auto-generated by pre-save hook
+    {
       shipper: shippers[0]._id, carrier: carriers[0]._id, createdBy: adminUser._id,
       modeOfTransport: 'truckload-ftl',
       origin: { name: 'Global Goods NJ Warehouse', address: '100 Factory Ln', city: 'Newark', state: 'NJ', zip: '07101', locationType: 'shipper_facility' },
@@ -167,7 +170,7 @@ const seedShipments = async (shippers: IShipper[], carriers: ICarrier[], users: 
       customerRate: 3800, carrierCostTotal: 3000, purchaseOrderNumbers: ['PO-GG-001', 'PO-GG-002'],
       internalNotes: 'Standard FTL, live load/unload.', proNumber: "SPDY1001"
     },
-    { 
+    {
       shipper: shippers[1]._id, carrier: carriers[1]._id, createdBy: adminUser._id,
       modeOfTransport: 'drayage-import', containerNumber: 'MSCU7654321', bookingNumber: 'BKNG-IMPORT-777',
       steamshipLine: 'Oceanic Transport Co.', terminal: 'APM Terminal - Los Angeles', lastFreeDayPort: new Date('2024-08-12'),
@@ -179,16 +182,15 @@ const seedShipments = async (shippers: IShipper[], carriers: ICarrier[], users: 
       commodityDescription: 'High-Value Electronics', customerRate: 1500, carrierCostTotal: 1100,
       billOfLadingNumber: 'MBL-SEAXYZ990', deliveryOrderNumber: "DO-LAX-556"
     },
-    { // A quote example
-      shipper: shippers[0]._id, createdBy: adminUser._id, // Carrier might not be assigned on a quote yet
-      // Let's assign a carrier for now for simplicity of data, but in real quote it could be null
-      carrier: carriers[0]._id, 
+    {
+      shipper: shippers[0]._id, createdBy: adminUser._id,
+      carrier: carriers[0]._id, // Optional for quote, but provided for seed data simplicity
       modeOfTransport: 'truckload-ltl', status: 'quote',
       origin: { name: 'Supplier Dock A', address: '50 Manufacturing Row', city: 'Edison', state: 'NJ', zip: '08817', locationType: 'shipper_facility' },
       destination: { name: 'Customer Store #12', address: '75 Retail Plaza', city: 'Philadelphia', state: 'PA', zip: '19103', locationType: 'consignee_facility' },
       scheduledPickupDate: new Date('2024-08-20'), scheduledDeliveryDate: new Date('2024-08-21'),
       equipmentType: "LTL Van", commodityDescription: "3 Pallets - Mixed Goods", totalWeight: 1500, pieceCount: 3,
-      customerRate: 450, carrierCostTotal: 300, // Estimated costs for quote
+      customerRate: 450, carrierCostTotal: 300,
       quoteNotes: "Rate valid for 7 days. Subject to LTL carrier availability.", quoteValidUntil: new Date(new Date().setDate(new Date().getDate() + 7))
     }
   ];
@@ -204,8 +206,8 @@ const seedShipments = async (shippers: IShipper[], carriers: ICarrier[], users: 
 
 const seedDocuments = async (users: IUser[], shipments: IShipment[], carriers: ICarrier[], shippers: IShipper[]): Promise<IDocument[]> => {
   const adminUser = users.find(u => u.role === 'admin');
-  if (!adminUser || shipments.length === 0 || carriers.length === 0) {
-      logger.warn("Cannot seed documents due to missing admin user or shipments/carriers.");
+  if (!adminUser || shipments.length === 0 || carriers.length === 0) { // Added shippers check if relatedTo uses it
+      logger.warn("Cannot seed documents due to missing admin user or shipments/carriers/shippers.");
       return [];
   }
   const documentsData: Partial<IDocument>[] = [
@@ -213,18 +215,18 @@ const seedDocuments = async (users: IUser[], shipments: IShipment[], carriers: I
     { filename: 'dummy_pod_01.jpg', originalName: 'POD_TMS-AUTO1.jpg', mimetype: 'image/jpeg', size: 204800, path: `uploads/dummy_pod_01.jpg`, tags: ['POD'], relatedTo: { type: 'shipment' as const, id: shipments[0]?._id }, uploadedBy: adminUser._id },
     { filename: 'carrier_agreement_speedy.pdf', originalName: 'SpeedyFreight_MasterAgreement.pdf', mimetype: 'application/pdf', size: 512000, path: `uploads/carrier_agreement_speedy.pdf`, tags: ['Agreement', 'Contract'], relatedTo: { type: 'carrier' as const, id: carriers[0]?._id }, uploadedBy: adminUser._id },
   ];
-   // Create dummy files in uploads folder if they don't exist for seed to work without actual uploads
-    const dummyUploadsPath = path.join(__dirname, '../../../uploads'); // Adjust if your structure is different
-    if (!fs.existsSync(dummyUploadsPath)) fs.mkdirSync(dummyUploadsPath, { recursive: true });
-    documentsData.forEach(doc => {
-        const filePath = path.join(dummyUploadsPath, doc.filename as string);
+
+  const dummyUploadsPath = path.join(__dirname, '../../../uploads');
+  if (!fs.existsSync(dummyUploadsPath)) fs.mkdirSync(dummyUploadsPath, { recursive: true });
+  documentsData.forEach(doc => {
+      if (doc.filename) {
+        const filePath = path.join(dummyUploadsPath, doc.filename);
         if (!fs.existsSync(filePath)) {
             fs.writeFileSync(filePath, "This is a dummy file for seeding.");
         }
-        // Update path in docData to be relative to project root or as stored in DB
-        doc.path = `uploads/${doc.filename}`; // Assuming 'uploads' is at project root level
-    });
-
+        doc.path = `uploads/${doc.filename}`;
+      }
+  });
 
   try {
     const documents = await DocModel.create(documentsData);
@@ -260,7 +262,7 @@ const seedDatabase = async () => {
   process.exit(0);
 };
 
-seedDatabase().catch((error: any) => { // Added type for error
+seedDatabase().catch((error: any) => {
   logger.error('Error during database seeding:', { message: error.message, stack: error.stack });
   mongoose.disconnect().finally(() => process.exit(1));
 });

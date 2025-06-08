@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Carrier, ICarrier } from '../models/Carrier';
-import { Shipment } from '../models/Shipment'; // Import Shipment
+import { Shipment } from '../models/Shipment'; // Uses the named export 'Shipment'
 import { SaferService } from '../services/integrations/saferService';
 import { logger } from '../utils/logger';
 
@@ -34,8 +34,14 @@ export class CarrierController {
       const page = pageQuery ? parseInt(pageQuery, 10) : 1;
       const limit = limitQuery ? parseInt(limitQuery, 10) : 100;
 
-      if (isNaN(page) || page < 1) { res.status(400).json({ success: false, message: 'Invalid page number.' }); return; }
-      if (isNaN(limit) || limit < 1) { res.status(400).json({ success: false, message: 'Invalid limit number.' }); return; }
+      if (isNaN(page) || page < 1) { 
+        res.status(400).json({ success: false, message: 'Invalid page number.' }); 
+        return; 
+      }
+      if (isNaN(limit) || limit < 1) { 
+        res.status(400).json({ success: false, message: 'Invalid limit number.' }); 
+        return; 
+      }
 
       let query: any = {};
       const { name, mcNumber, dotNumber, searchTerm } = req.query;
@@ -121,7 +127,7 @@ export class CarrierController {
             logger.info(`Fetching SAFER data for new carrier DOT: ${newCarrier.dotNumber}`);
             const saferData = await saferService.getCarrierSafetyData(newCarrier.dotNumber);
             if (saferData) {
-                (newCarrier.saferData as any) = { ...newCarrier.saferData, ...saferData, lastUpdated: new Date() };
+                newCarrier.saferData = { ...(newCarrier.saferData || {}), ...saferData, lastUpdated: new Date() };
                 await newCarrier.save();
                 logger.info(`SAFER data updated for new carrier ${newCarrier.name}`);
             }
@@ -140,9 +146,15 @@ export class CarrierController {
     logger.info(`Attempting to get carrier by ID: ${req.params.id}`);
     try {
         const { id } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid carrier ID format.'}); return; }
+        if (!mongoose.Types.ObjectId.isValid(id)) { 
+            res.status(400).json({ success: false, message: 'Invalid carrier ID format.'}); 
+            return; 
+        }
         const carrier = await Carrier.findById(id).lean();
-        if (!carrier) { res.status(404).json({ success: false, message: 'Carrier not found.' }); return; }
+        if (!carrier) { 
+            res.status(404).json({ success: false, message: 'Carrier not found.' }); 
+            return; 
+        }
         res.status(200).json({ success: true, data: carrier });
     } catch (error: any) {
         logger.error('Error in getCarrierById:', { message: error.message, stack: error.stack, id: req.params.id });
@@ -154,13 +166,22 @@ export class CarrierController {
     const { id } = req.params;
     logger.info(`Attempting to update SAFER data for carrier ID: ${id}`);
     try {
-      if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid carrier ID format.' }); return; }
+      if (!mongoose.Types.ObjectId.isValid(id)) { 
+        res.status(400).json({ success: false, message: 'Invalid carrier ID format.' }); 
+        return; 
+      }
       const carrier = await Carrier.findById(id);
-      if (!carrier) { res.status(404).json({ success: false, message: 'Carrier not found.' }); return; }
-      if (!carrier.dotNumber) { res.status(400).json({ success: false, message: 'Carrier does not have a DOT number.' }); return; }
+      if (!carrier) { 
+        res.status(404).json({ success: false, message: 'Carrier not found.' }); 
+        return; 
+      }
+      if (!carrier.dotNumber) { 
+        res.status(400).json({ success: false, message: 'Carrier does not have a DOT number.' }); 
+        return; 
+      }
       const safetyData = await saferService.getCarrierSafetyData(carrier.dotNumber);
       if (safetyData) {
-        (carrier.saferData as any) = { ...(carrier.saferData || {}), ...safetyData, lastUpdated: new Date() };
+        carrier.saferData = { ...(carrier.saferData || {}), ...safetyData, lastUpdated: new Date() };
         await carrier.save();
         logger.info(`SAFER data updated for carrier: ${carrier.name}`);
         res.status(200).json({ success: true, message: 'SAFER data updated successfully.', data: carrier });
@@ -182,11 +203,8 @@ export class CarrierController {
         return;
     }
     try {
-        const updateData = req.body; // Frontend sends the full nested structure now
+        const updateData = req.body;
         
-        // Example: if you needed to parse something specific from updateData
-        // if (updateData.someField) updateData.someField = parseFloat(updateData.someField) || 0;
-
         const updatedCarrier = await Carrier.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true }).lean();
 
         if (!updatedCarrier) {
@@ -220,10 +238,11 @@ export class CarrierController {
 
       if (activeShipmentsCount > 0) {
         logger.warn(`Attempt to delete carrier ID: ${id} with ${activeShipmentsCount} active shipments.`);
-        return res.status(409).json({
+        res.status(409).json({ // Removed 'return' from here
           success: false,
           message: `Cannot delete carrier. It is associated with ${activeShipmentsCount} active shipment(s). Please reassign or cancel these shipments first.`
         });
+        return; // Added 'return' here to ensure function exits
       }
       const carrier = await Carrier.findByIdAndDelete(id);
       if (!carrier) {

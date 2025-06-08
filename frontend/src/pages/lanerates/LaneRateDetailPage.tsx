@@ -25,7 +25,7 @@ interface DisplayAccessorial {
 
 interface LaneRateDetailEntry {
   _id: string;
-  carrier: CarrierStub;
+  carrier: CarrierStub | null; // Allow carrier to be null
   lineHaulRate?: number;
   lineHaulCost?: number;
   fscPercentage?: number;
@@ -135,6 +135,9 @@ const LaneRateDetailPage: React.FC = () => {
       },
       onError: (error: any, variables) => {
         toast.error(error.response?.data?.message || `Failed to ${variables.id ? 'update' : 'add'} manual lane rate.`);
+        console.error("Manual Lane Rate Mutation error:", error.response?.data || error.message, error); // Log the full error
+        setIsManualFormOpen(false);
+        setEditingManualRateData(null); 
       },
     }
   );
@@ -184,11 +187,12 @@ const LaneRateDetailPage: React.FC = () => {
             destinationCity: rateToEdit.destinationCity,
             destinationState: rateToEdit.destinationState,
             destinationZip: rateToEdit.destinationZip || '',
-            carrier: rateToEdit.carrier._id,
+            carrier: rateToEdit.carrier?._id || '', // Safely access _id, fallback to empty string
             lineHaulCost: rateToEdit.lineHaulCost?.toString() || '0',
             fscPercentage: rateToEdit.fscPercentage?.toString() || '',
             chassisCostCarrier: rateToEdit.chassisCostCarrier?.toString() || '',
             manualAccessorials: (rateToEdit.displayAccessorials || rateToEdit.manualAccessorials || []).map(acc => ({
+                _id: (acc as any)._id || undefined, // Ensure existing _id is preserved if present
                 name: acc.name,
                 cost: acc.cost.toString(),
                 notes: acc.notes || ''
@@ -201,17 +205,27 @@ const LaneRateDetailPage: React.FC = () => {
         };
         setEditingManualRateData(formDataToEdit);
     } else {
-        setEditingManualRateData(null);
+        // For new entries, prefill with query params if available
+        setEditingManualRateData({
+            ...initialManualLaneRateFormData, // Start with default empty values
+            originCity: originCity || initialManualLaneRateFormData.originCity,
+            originState: originState || initialManualLaneRateFormData.originState,
+            originZip: originZipParam || initialManualLaneRateFormData.originZip,
+            destinationCity: destinationCity || initialManualLaneRateFormData.destinationCity,
+            destinationState: destinationState || initialManualLaneRateFormData.destinationState,
+            destinationZip: destinationZipParam || initialManualLaneRateFormData.destinationZip,
+            // carrier: '', // Ensure carrier is an empty string for new if it's a controlled component
+        });
     }
     setIsManualFormOpen(true);
   };
-  
+
   const handleSaveManualLaneRate = (formData: ManualLaneRateFormData) => {
     manualRateMutation.mutate({ id: editingManualRateData?._id, formData });
   };
 
   const pageTitle = `Lane Rates: ${originCity || 'N/A'}, ${originState || 'N/A'} → ${destinationCity || 'N/A'}, ${destinationState || 'N/A'}`;
-  
+
   if (!originCity || !originState || !destinationCity || !destinationState) {
     return (
         <Box sx={{p:3}}>
@@ -234,6 +248,15 @@ const LaneRateDetailPage: React.FC = () => {
           Filtering by Zip - Origin: {originZipParam || 'Any'} → Destination: {destinationZipParam || 'Any'}
         </Typography>
       )}
+       <Button
+        variant="contained"
+        onClick={() => handleOpenManualForm()} // Call without args for new entry
+        sx={{ mb: 2, float: 'right' }}
+        startIcon={<EditIcon />}
+      >
+        Add Manual Rate
+      </Button>
+
 
       {(isLoading || isFetching) && !detailResponse && <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>}
       {isError && <Alert severity="error">Error fetching lane details: {(error as any)?.response?.data?.message || (error as any)?.message || 'Unknown error'}</Alert>}
@@ -282,7 +305,7 @@ const LaneRateDetailPage: React.FC = () => {
                     <TableCell>
                       {rate.sourceShipmentId?._id && rate.sourceType === 'TMS_SHIPMENT' ? (
                         <MuiLink component={RouterLink} to={`/shipments/${rate.sourceShipmentId._id}`}>
-                            {rate.sourceQuoteShipmentNumber}
+                            {rate.sourceQuoteShipmentNumber || rate.sourceShipmentId.shipmentNumber}
                         </MuiLink>
                       ) : (
                         rate.sourceQuoteShipmentNumber || rate.sourceType || '-'

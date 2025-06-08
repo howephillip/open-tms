@@ -1,18 +1,16 @@
 // File: backend/src/controllers/shipmentController.ts
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthenticatedRequest } from '../types/AuthenticatedRequest'; // Assuming this path is correct
 import mongoose from 'mongoose';
-import { Shipment, IShipment, IReferenceNumber } from '../models/Shipment';
+import { Shipment, IShipment, IReferenceNumber, ModeOfTransportType, ShipmentStatusType, IQuoteAccessorial } from '../models/Shipment';
 import { Carrier } from '../models/Carrier';
 import { Shipper } from '../models/Shipper';
 import { User } from '../models/User';
 import { Document as DocModel } from '../models/Document';
 import { ApplicationSettings, IQuoteFormSettings } from '../models/ApplicationSettings';
-import { LaneRateService } from '../services/laneRateService';
 import { AIEmailService } from '../services/ai/emailService';
 import { logger } from '../utils/logger';
-import { LaneRate } from '../models/LaneRate'; // Import LaneRate for deleteShipment
 
-const laneRateService = new LaneRateService();
 let aiEmailServiceInstance: AIEmailService | null = null;
 
 function getAIEmailService(): AIEmailService {
@@ -29,7 +27,7 @@ function getAIEmailService(): AIEmailService {
 }
 
 const parseSortQuery = (sortQueryString?: string): Record<string, 1 | -1> => {
-    if (!sortQueryString) return { createdAt: -1 };
+    if (!sortQueryString) return { createdAt: -1 }; // Default sort
     const sortOptions: Record<string, 1 | -1> = {};
     sortQueryString.split(',').forEach(part => {
         const trimmedPart = part.trim();
@@ -39,45 +37,57 @@ const parseSortQuery = (sortQueryString?: string): Record<string, 1 | -1> => {
             sortOptions[trimmedPart] = 1;
         }
     });
-    return sortOptions;
+    // Corrected: Ensure it returns a valid object even if sortOptions is empty
+    return Object.keys(sortOptions).length > 0 ? sortOptions : { createdAt: -1 }; 
 };
 
 const defaultControllerQuoteFormSettings: IQuoteFormSettings = {
-    requiredFields: ['shipper', 'modeOfTransport', 'equipmentType', 'originCity', 'originState', 'destinationCity', 'destinationState', 'scheduledPickupDate', 'commodityDescription', 'customerRate'],
+    requiredFields: [
+        'shipper', 'modeOfTransport', 'equipmentType',
+        'origin.city', 'origin.state',
+        'destination.city', 'destination.state',
+        'scheduledPickupDate',
+        'commodityDescription',
+        'customerRate'
+    ],
     quoteNumberPrefix: 'QT-',
     quoteNumberNextSequence: 1001,
 };
+logger.info('SHIPMENT CONTROLLER: defaultControllerQuoteFormSettings has been defined at module scope.');
 
-// Helper to get value from potentially nested payload based on flat fieldId
-const getFieldValue = (payload: any, fieldId: string) => {
-    if (fieldId.startsWith('origin') && fieldId !== 'origin') {
-        const subField = fieldId.substring('origin'.length).charAt(0).toLowerCase() + fieldId.substring('origin'.length + 1);
-        return payload.origin?.[subField];
-    } else if (fieldId.startsWith('destination') && fieldId !== 'destination') {
-        const subField = fieldId.substring('destination'.length).charAt(0).toLowerCase() + fieldId.substring('destination'.length + 1);
-        return payload.destination?.[subField];
-    } else {
-        return payload[fieldId];
+const getFieldValue = (payload: any, fieldId: string): any => {
+    const parts = fieldId.split('.');
+    let value = payload;
+    for (const part of parts) {
+        if (value && typeof value === 'object' && value.hasOwnProperty(part)) {
+            value = value[part];
+        } else {
+            return undefined;
+        }
     }
+    return value;
 };
 
-
 export class ShipmentController {
-  async createShipment(req: Request, res: Response): Promise<void> {
-    logger.info('Attempting to create shipment with body:', JSON.stringify(req.body, null, 2));
+  async createShipment(req: AuthenticatedRequest, res: Response): Promise<void> {
+    logger.info('--- ENTERING createShipment ---');
     try {
       let activeQuoteFormSettings: IQuoteFormSettings = { ...defaultControllerQuoteFormSettings };
-      const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
-      if (settingsDoc && settingsDoc.settings) {
-        const dbSettings = settingsDoc.settings as IQuoteFormSettings;
-        activeQuoteFormSettings = { // Merge ensuring all keys from default are present
-          requiredFields: dbSettings.requiredFields || defaultControllerQuoteFormSettings.requiredFields,
-          quoteNumberPrefix: dbSettings.quoteNumberPrefix || defaultControllerQuoteFormSettings.quoteNumberPrefix,
-          quoteNumberNextSequence: dbSettings.quoteNumberNextSequence || defaultControllerQuoteFormSettings.quoteNumberNextSequence,
-        };
-        logger.info('Loaded quote form settings from DB for validation:', activeQuoteFormSettings.requiredFields);
-      } else {
-        logger.warn('No quote form settings found in DB for validation, using controller defaults:', activeQuoteFormSettings.requiredFields);
+      try {
+        const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
+        if (settingsDoc && settingsDoc.settings) {
+          const dbSettings = settingsDoc.settings as IQuoteFormSettings;
+          activeQuoteFormSettings = {
+            requiredFields: dbSettings.requiredFields && dbSettings.requiredFields.length > 0 ? dbSettings.requiredFields : defaultControllerQuoteFormSettings.requiredFields,
+            quoteNumberPrefix: dbSettings.quoteNumberPrefix || defaultControllerQuoteFormSettings.quoteNumberPrefix,
+            quoteNumberNextSequence: dbSettings.quoteNumberNextSequence || defaultControllerQuoteFormSettings.quoteNumberNextSequence,
+          };
+          logger.info('Loaded quote form settings from DB for validation:', activeQuoteFormSettings.requiredFields);
+        } else {
+          logger.warn('No quote form settings found in DB for validation, using controller defaults:', activeQuoteFormSettings.requiredFields);
+        }
+      } catch (settingsError: any) {
+        logger.error('Error fetching quoteForm settings, using controller defaults:', settingsError.message);
       }
 
       const {
@@ -89,42 +99,36 @@ export class ShipmentController {
       } = req.body;
 
       logger.info('Shipment payload received for validation:', JSON.stringify(shipmentPayload, null, 2));
-
       const missingFields: string[] = [];
 
-      // --- Universal System Requirements ---
       if (!shipmentPayload.createdBy) missingFields.push('createdBy (System)');
       if (!shipmentPayload.status) missingFields.push('status (System)');
-      if (!shipmentPayload.modeOfTransport) missingFields.push('modeOfTransport (System)'); // Example of a base required field
-      if (!shipmentPayload.customerRate === undefined || shipmentPayload.customerRate === null) missingFields.push('customerRate (System)');
-      if (!shipmentPayload.carrierCostTotal === undefined || shipmentPayload.carrierCostTotal === null) missingFields.push('carrierCostTotal (System)');
-
-
-      // --- Conditional Validation based on Settings / Status ---
+      
       if (shipmentPayload.status === 'quote') {
         logger.info('Validating as a QUOTE using settings:', activeQuoteFormSettings.requiredFields);
-        for (const fieldId of activeQuoteFormSettings.requiredFields) {
+        (activeQuoteFormSettings.requiredFields || []).forEach(fieldId => {
           const value = getFieldValue(shipmentPayload, fieldId);
-          if (fieldId === 'carrier') continue; // Carrier is always optional for a new quote
+          if (fieldId === 'carrier' && !shipmentPayload.carrier) { return; }
           if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
             missingFields.push(fieldId);
           }
-        }
-      } else { // Stricter validation for non-quote shipments
-        logger.info('Validating as a non-quote SHIPMENT using specific hardcoded universal requirements.');
+        });
+      } else { 
+        logger.info('Validating as a non-quote SHIPMENT.');
         const universallyRequiredForBooked = [
-            'shipper', 'carrier', // Carrier is required for booked
-            'originCity', 'originState', // Minimal origin/dest
-            'destinationCity', 'destinationState',
-            'scheduledPickupDate', 'scheduledDeliveryDate', // Delivery date more important for booked
+            'shipper', 'carrier', 'modeOfTransport',
+            'origin.city', 'origin.state', 
+            'destination.city', 'destination.state',
+            'scheduledPickupDate', 'scheduledDeliveryDate', 
             'equipmentType', 'commodityDescription',
+            'customerRate', 'carrierCostTotal'
         ];
-        for (const fieldId of universallyRequiredForBooked) {
+        universallyRequiredForBooked.forEach(fieldId => {
              const value = getFieldValue(shipmentPayload, fieldId);
              if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
                 missingFields.push(fieldId);
              }
-        }
+        });
       }
 
       if (missingFields.length > 0) {
@@ -136,30 +140,59 @@ export class ShipmentController {
 
       const shipmentData: Partial<IShipment> = { ...shipmentPayload };
 
-      if (shipmentData.shipper && typeof shipmentData.shipper === 'string' && mongoose.Types.ObjectId.isValid(shipmentData.shipper)) {
-        shipmentData.shipper = new mongoose.Types.ObjectId(shipmentData.shipper);
-      } else if (shipmentData.shipper && typeof shipmentData.shipper === 'string') {
-          logger.warn(`Invalid shipper ID: ${shipmentData.shipper}`);
-          res.status(400).json({ success: false, message: 'Invalid shipper ID format.' }); return;
-      } // If shipper is missing and required, it would be caught by the validation above
+      // Shipper processing
+      if (shipmentData.hasOwnProperty('shipper')) {
+        const shipperValue = shipmentData.shipper;
+        if (typeof shipperValue === 'string') {
+            if (shipperValue.trim() === '') { // Check for empty string first
+                logger.warn('Shipper ID is an empty string for createShipment.');
+                res.status(400).json({ success: false, message: 'Shipper ID cannot be empty.' }); return;
+            } else if (mongoose.Types.ObjectId.isValid(shipperValue)) {
+                shipmentData.shipper = new mongoose.Types.ObjectId(shipperValue);
+            } else {
+                logger.warn(`Invalid shipper ID format: ${shipperValue}`);
+                res.status(400).json({ success: false, message: 'Invalid Shipper ID format.' }); return;
+            }
+        } else if (shipperValue === null || shipperValue === undefined) {
+            logger.warn('Shipper ID is missing or null for createShipment.');
+            res.status(400).json({ success: false, message: 'Shipper ID is required.' }); return;
+        } // If already ObjectId, it's fine
+      } else if (!shipmentData.shipper) { 
+         logger.warn('Shipper ID is missing from payload for createShipment.');
+         res.status(400).json({ success: false, message: 'Shipper ID is required.' }); return;
+      }
 
-      if (shipmentData.carrier && typeof shipmentData.carrier === 'string' && mongoose.Types.ObjectId.isValid(shipmentData.carrier)) {
-        shipmentData.carrier = new mongoose.Types.ObjectId(shipmentData.carrier);
-      } else if (shipmentData.carrier === '' || shipmentData.carrier === null || shipmentData.carrier === undefined) {
-        delete shipmentData.carrier; // Allow carrier to be undefined if not provided or empty
-      } else if (shipmentData.carrier && typeof shipmentData.carrier === 'string') {
-          logger.warn(`Invalid carrier ID: ${shipmentData.carrier}`);
-          res.status(400).json({ success: false, message: 'Invalid carrier ID format.' }); return;
+      // Carrier processing
+      if (shipmentData.hasOwnProperty('carrier')) {
+        const carrierValue = shipmentData.carrier;
+        if (typeof carrierValue === 'string') {
+            if (carrierValue.trim() === '') {
+                delete shipmentData.carrier; 
+            } else if (mongoose.Types.ObjectId.isValid(carrierValue)) {
+                shipmentData.carrier = new mongoose.Types.ObjectId(carrierValue);
+            } else { 
+                logger.warn(`Invalid carrier ID: ${carrierValue}`);
+                res.status(400).json({success:false, message: "Invalid Carrier ID format."}); return;
+            }
+        } else if (carrierValue === null || carrierValue === undefined) {
+             delete shipmentData.carrier;
+        }
+      } else if (shipmentPayload.status !== 'quote' && !shipmentData.carrier) {
+         logger.warn('Carrier ID is missing for non-quote shipment.');
+         res.status(400).json({ success: false, message: 'Carrier ID is required for booked shipments.' }); return;
       }
 
 
-      if (shipmentData.createdBy && typeof shipmentData.createdBy === 'string' && mongoose.Types.ObjectId.isValid(shipmentData.createdBy)) {
-        shipmentData.createdBy = new mongoose.Types.ObjectId(shipmentData.createdBy);
-      } else if (shipmentData.createdBy && typeof shipmentData.createdBy === 'string') {
-         logger.warn(`Invalid createdBy ID: ${shipmentData.createdBy}`);
-         res.status(400).json({ success: false, message: 'Invalid createdBy ID format.' }); return;
+      if (shipmentData.createdBy && typeof shipmentData.createdBy === 'string') {
+        if (mongoose.Types.ObjectId.isValid(shipmentData.createdBy)) {
+            shipmentData.createdBy = new mongoose.Types.ObjectId(shipmentData.createdBy);
+        } else {
+            logger.warn(`Invalid createdBy ID: ${shipmentData.createdBy}`);
+            res.status(400).json({ success: false, message: 'Invalid createdBy ID format.' }); return;
+        }
       }
-
+      
+      // ... (rest of the createShipment method from previous correct version) ...
       if (shipmentPayload.otherReferenceNumbersString && typeof shipmentPayload.otherReferenceNumbersString === 'string') {
         try {
             shipmentData.otherReferenceNumbers = shipmentPayload.otherReferenceNumbersString.split(',')
@@ -196,14 +229,6 @@ export class ShipmentController {
       await shipment.save();
       logger.info('Shipment saved successfully', { shipmentId: shipment._id, shipmentNumber: shipment.shipmentNumber });
 
-      if (shipment.status === 'quote' || shipment.status === 'booked') {
-        try {
-          await laneRateService.recordLaneRateFromShipment(shipment);
-        } catch (laneRateError: any) {
-          logger.error(`Failed to record lane rate for new shipment ${shipment.shipmentNumber}: ${laneRateError.message}`);
-        }
-      }
-
       const populatedShipment = await Shipment.findById(shipment._id)
         .populate({ path: 'shipper', select: 'name' }).populate({ path: 'carrier', select: 'name' })
         .populate({ path: 'createdBy', select: 'firstName lastName email'})
@@ -211,15 +236,20 @@ export class ShipmentController {
         .populate({ path: 'accessorials.accessorialTypeId', select: 'name code unitName' })
         .lean();
       res.status(201).json({ success: true, data: populatedShipment, message: 'Shipment created successfully' });
+
     } catch (error: any) {
       logger.error('CRITICAL ERROR in createShipment:', { message: error.message, name: error.name, stack: error.stack, requestBody: req.body, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2) });
-      if (error.name === 'ValidationError') res.status(400).json({ success: false, message: error.message, errors: error.errors });
-      else if (error.code === 11000) res.status(409).json({ success: false, message: `Duplicate key error. Field: ${JSON.stringify(error.keyValue)}`, errorDetails: error.keyValue });
-      else res.status(500).json({ success: false, message: 'Error creating shipment', errorDetails: error.message });
+      if (error.name === 'ValidationError') {
+        res.status(400).json({ success: false, message: error.message, errors: error.errors });
+      } else if (error.code === 11000) {
+        res.status(409).json({ success: false, message: `Duplicate key error. Field: ${JSON.stringify(error.keyValue)}`, errorDetails: error.keyValue });
+      } else {
+        res.status(500).json({ success: false, message: 'Error creating shipment', errorDetails: error.message });
+      }
     }
   }
 
-  async getShipments(req: Request, res: Response): Promise<void> {
+  async getShipments(req: AuthenticatedRequest, res: Response): Promise<void> {
     logger.info('Attempting to get shipments. Query params:', req.query);
     try {
       const pageQuery = req.query.page as string | undefined;
@@ -311,20 +341,30 @@ export class ShipmentController {
     } catch (error: any) { logger.error('CRITICAL ERROR in getShipments:', { message: error.message, name: error.name, stack: error.stack, query: req.query, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}); res.status(500).json({ success: false, message: 'Internal server error while fetching shipments.', errorDetails: error.message }); }
   }
 
-  async updateShipment(req: Request, res: Response): Promise<void> {
+  async updateShipment(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`Attempting to update shipment ID: ${id} with body:`, JSON.stringify(req.body, null, 2));
-    if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid shipment ID format.' }); return;}
+    if (!mongoose.Types.ObjectId.isValid(id)) { 
+        res.status(400).json({ success: false, message: 'Invalid shipment ID format.' }); 
+        return;
+    }
     try {
-      let quoteFormSettings: IQuoteFormSettings = {...defaultControllerQuoteFormSettings};
-      const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
-      if (settingsDoc && settingsDoc.settings) {
-        const dbSettings = settingsDoc.settings as IQuoteFormSettings;
-        quoteFormSettings = {
-            ...defaultControllerQuoteFormSettings,
-            ...(settingsDoc.settings as Partial<IQuoteFormSettings>),
-            requiredFields: dbSettings.requiredFields || defaultControllerQuoteFormSettings.requiredFields
-        };
+      let activeQuoteFormSettings: IQuoteFormSettings = { ...defaultControllerQuoteFormSettings }; 
+      try {
+          const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
+          if (settingsDoc && settingsDoc.settings) {
+              const dbSettings = settingsDoc.settings as IQuoteFormSettings;
+              activeQuoteFormSettings = {
+                  ...defaultControllerQuoteFormSettings, 
+                  ...(settingsDoc.settings as Partial<IQuoteFormSettings>),
+                  requiredFields: dbSettings.requiredFields && dbSettings.requiredFields.length > 0 ? dbSettings.requiredFields : defaultControllerQuoteFormSettings.requiredFields,
+              };
+              logger.info('Loaded quote form settings from DB for update validation:', activeQuoteFormSettings.requiredFields);
+          } else {
+              logger.warn('No quote form settings found in DB for update validation, using controller defaults:', activeQuoteFormSettings.requiredFields);
+          }
+      } catch (settingsError: any) {
+          logger.error('Error fetching quoteForm settings for update, using controller defaults:', settingsError.message);
       }
 
       const {
@@ -336,68 +376,115 @@ export class ShipmentController {
       } = req.body;
       const shipmentDataToUpdate: Partial<IShipment> = { ...shipmentPayload };
 
+      const missingFieldsUpdate: string[] = [];
       if (shipmentDataToUpdate.status === 'quote') {
-        const missingRequiredUpdates: string[] = [];
-        for (const fieldId of quoteFormSettings.requiredFields) {
-            let value = getFieldValue(shipmentDataToUpdate, fieldId);
-            if (fieldId.startsWith('origin') && fieldId !== 'origin') { // Special check for nested objects based on flat field IDs
-                if (!shipmentDataToUpdate.origin) missingRequiredUpdates.push(fieldId); // Origin object itself must exist
-            } else if (fieldId.startsWith('destination') && fieldId !== 'destination') {
-                if (!shipmentDataToUpdate.destination) missingRequiredUpdates.push(fieldId); // Destination object itself must exist
-            }
-
-            if (fieldId === 'carrier') continue;
+        logger.info('Validating UPDATED QUOTE using settings:', activeQuoteFormSettings.requiredFields);
+        (activeQuoteFormSettings.requiredFields || []).forEach(fieldId => {
+            const value = getFieldValue(shipmentDataToUpdate, fieldId);
+            if (fieldId === 'carrier' && !shipmentDataToUpdate.carrier) { return; }
             
-            // Check if the field is part of the update payload
-            // and if its value is missing (undefined, null, or empty string)
-            const isFieldInPayload = shipmentDataToUpdate.hasOwnProperty(fieldId) || 
-                                     (fieldId.startsWith('origin') && shipmentDataToUpdate.origin?.hasOwnProperty(fieldId.substring('origin'.length).charAt(0).toLowerCase() + fieldId.substring('origin'.length + 1))) ||
-                                     (fieldId.startsWith('destination') && shipmentDataToUpdate.destination?.hasOwnProperty(fieldId.substring('destination'.length).charAt(0).toLowerCase() + fieldId.substring('destination'.length + 1)));
-
-            if (isFieldInPayload && (value === undefined || value === null || (typeof value === 'string' && value.trim() === ''))) {
-                missingRequiredUpdates.push(fieldId);
+            let fieldExistsInPayload = shipmentPayload.hasOwnProperty(fieldId);
+            if (!fieldExistsInPayload && fieldId.startsWith('origin')) {
+                const subFieldParts = fieldId.split('.');
+                if (subFieldParts.length > 1 && shipmentPayload.origin?.hasOwnProperty(subFieldParts[1])) {
+                    fieldExistsInPayload = true;
+                }
+            } else if (!fieldExistsInPayload && fieldId.startsWith('destination')) {
+                const subFieldParts = fieldId.split('.');
+                 if (subFieldParts.length > 1 && shipmentPayload.destination?.hasOwnProperty(subFieldParts[1])) {
+                    fieldExistsInPayload = true;
+                }
             }
+
+            if (fieldExistsInPayload && (value === undefined || value === null || (typeof value === 'string' && value.trim() === ''))) {
+                missingFieldsUpdate.push(fieldId);
+            }
+        });
+      } else if (shipmentDataToUpdate.status && (shipmentDataToUpdate.status as ShipmentStatusType) !== 'quote') { // Explicit cast for comparison
+        logger.info('Validating UPDATED non-quote SHIPMENT.');
+         const universallyRequiredForBooked = [
+            'shipper', 'carrier', 'modeOfTransport',
+            'origin.city', 'origin.state', 
+            'destination.city', 'destination.state',
+            'scheduledPickupDate', 'scheduledDeliveryDate', 
+            'equipmentType', 'commodityDescription',
+            'customerRate', 'carrierCostTotal'
+        ];
+        universallyRequiredForBooked.forEach(fieldId => {
+            const value = getFieldValue(shipmentDataToUpdate, fieldId);
+            let fieldInPayload = shipmentPayload.hasOwnProperty(fieldId);
+             if (!fieldInPayload && fieldId.startsWith('origin')) {
+                const subFieldParts = fieldId.split('.');
+                if (subFieldParts.length > 1 && shipmentPayload.origin?.hasOwnProperty(subFieldParts[1])) fieldInPayload = true;
+            } else if (!fieldInPayload && fieldId.startsWith('destination')) {
+                const subFieldParts = fieldId.split('.');
+                if (subFieldParts.length > 1 && shipmentPayload.destination?.hasOwnProperty(subFieldParts[1])) fieldInPayload = true;
+            }
+            if (fieldInPayload && (value === undefined || value === null || (typeof value === 'string' && value.trim() === ''))) {
+                missingFieldsUpdate.push(fieldId);
+            }
+        });
+      }
+
+      if (missingFieldsUpdate.length > 0) {
+        const uniqueMissing = [...new Set(missingFieldsUpdate)];
+        logger.warn(`Validation Error on update: Missing/empty required fields: ${uniqueMissing.join(', ')}.`);
+        res.status(400).json({ success: false, message: `Missing or empty required fields for update: ${uniqueMissing.join(', ')}.` });
+        return;
+      }
+
+      if (req.user?._id) { 
+        shipmentDataToUpdate.updatedBy = new mongoose.Types.ObjectId(req.user._id.toString()); 
+      } else { 
+        const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id').lean(); 
+        if (defaultUser) shipmentDataToUpdate.updatedBy = defaultUser._id; 
+      }
+
+      if (shipmentDataToUpdate.hasOwnProperty('shipper')) {
+        const shipperValue = shipmentDataToUpdate.shipper;
+        if (typeof shipperValue === 'string') {
+            if (shipperValue.trim() === '') {
+                logger.warn(`Attempt to clear required field 'shipper' during update for shipment ID: ${id}`);
+                res.status(400).json({ success: false, message: "Shipper is a required field and cannot be empty." }); return;
+            } else if (mongoose.Types.ObjectId.isValid(shipperValue)) {
+                shipmentDataToUpdate.shipper = new mongoose.Types.ObjectId(shipperValue);
+            } else {
+                res.status(400).json({success:false, message: "Invalid Shipper ID format for update"}); return;
+            }
+        } else if (shipperValue === null || shipperValue === undefined) {
+            logger.warn(`Shipper ID is missing or null during update for shipment ID: ${id}`);
+            res.status(400).json({ success: false, message: 'Shipper ID is required.' }); return;
         }
-        if (missingRequiredUpdates.length > 0) {
-            const uniqueMissing = [...new Set(missingRequiredUpdates)];
-            logger.warn(`Validation Error on update: Trying to clear/set invalid value for required fields for quote. Missing/Invalid: ${uniqueMissing.join(', ')}`);
-            res.status(400).json({ success: false, message: `Cannot clear or leave empty required fields for quote: ${uniqueMissing.join(', ')}.` });
-            return;
+      }
+      
+      if (shipmentDataToUpdate.hasOwnProperty('carrier')) {
+        const carrierValue = shipmentDataToUpdate.carrier;
+        if (typeof carrierValue === 'string') {
+            if (carrierValue.trim() === '') {
+               delete shipmentDataToUpdate.carrier;
+            } else if (mongoose.Types.ObjectId.isValid(carrierValue)) {
+                shipmentDataToUpdate.carrier = new mongoose.Types.ObjectId(carrierValue);
+            } else { 
+                res.status(400).json({success:false, message: "Invalid Carrier ID format for update"}); return;
+            }
+        } else if (carrierValue === null || carrierValue === undefined) {
+           delete shipmentDataToUpdate.carrier;
         }
       }
 
-
-      if (req.user) { shipmentDataToUpdate.updatedBy = (req.user as any)._id; }
-      else { const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id'); if (defaultUser) shipmentDataToUpdate.updatedBy = defaultUser._id; }
-
-      if (shipmentDataToUpdate.shipper && typeof shipmentDataToUpdate.shipper === 'string' && mongoose.Types.ObjectId.isValid(shipmentDataToUpdate.shipper)) {
-        shipmentDataToUpdate.shipper = new mongoose.Types.ObjectId(shipmentDataToUpdate.shipper);
-      } else if (shipmentDataToUpdate.shipper === '' || shipmentDataToUpdate.shipper === null) {
-        (shipmentDataToUpdate as any).shipper = null;
-      } else if (shipmentDataToUpdate.shipper && typeof shipmentDataToUpdate.shipper === 'string') {
-        res.status(400).json({success:false, message: "Invalid Shipper ID for update"}); return;
-      }
-
-      if (shipmentDataToUpdate.carrier && typeof shipmentDataToUpdate.carrier === 'string' && mongoose.Types.ObjectId.isValid(shipmentDataToUpdate.carrier)) {
-        shipmentDataToUpdate.carrier = new mongoose.Types.ObjectId(shipmentDataToUpdate.carrier);
-      } else if (shipmentDataToUpdate.carrier === '' || shipmentDataToUpdate.carrier === null || shipmentDataToUpdate.carrier === undefined) {
-         (shipmentDataToUpdate as any).carrier = undefined;
-      } else if (shipmentDataToUpdate.carrier && typeof shipmentDataToUpdate.carrier === 'string') {
-        res.status(400).json({success:false, message: "Invalid Carrier ID for update"}); return;
-      }
-
-      if (shipmentPayload.otherReferenceNumbersString && typeof shipmentPayload.otherReferenceNumbersString === 'string') {
-         try {
-            shipmentDataToUpdate.otherReferenceNumbers = shipmentPayload.otherReferenceNumbersString.split(',')
-                .map((refStr: string) => { const parts = refStr.split(':'); const type = parts[0]?.trim(); const value = parts.slice(1).join(':')?.trim(); return { type, value }; })
-                .filter((ref: any) => ref.type && ref.value) as IReferenceNumber[];
-        } catch (e) { logger.warn("Could not parse otherReferenceNumbersString for update.", e)}
-      } else if (Array.isArray(shipmentPayload.otherReferenceNumbers)) {
+      if (shipmentPayload.hasOwnProperty('otherReferenceNumbersString')) {
+        if (typeof shipmentPayload.otherReferenceNumbersString === 'string' && shipmentPayload.otherReferenceNumbersString.trim() !== '') {
+            try {
+                shipmentDataToUpdate.otherReferenceNumbers = shipmentPayload.otherReferenceNumbersString.split(',')
+                    .map((refStr: string) => { const parts = refStr.split(':'); const type = parts[0]?.trim(); const value = parts.slice(1).join(':')?.trim(); return { type, value }; })
+                    .filter((ref: any) => ref.type && ref.value) as IReferenceNumber[];
+            } catch (e) { logger.warn("Could not parse otherReferenceNumbersString for update.", e); shipmentDataToUpdate.otherReferenceNumbers = [];}
+        } else if (shipmentPayload.otherReferenceNumbersString === '') {
+            shipmentDataToUpdate.otherReferenceNumbers = []; 
+        }
+      } else if (shipmentPayload.hasOwnProperty('otherReferenceNumbers') && Array.isArray(shipmentPayload.otherReferenceNumbers)) {
         shipmentDataToUpdate.otherReferenceNumbers = shipmentPayload.otherReferenceNumbers.filter( (ref: any) => typeof ref === 'object' && ref.type && ref.value ) as IReferenceNumber[];
-      } else if (shipmentPayload.otherReferenceNumbersString === '') {
-        shipmentDataToUpdate.otherReferenceNumbers = [];
       }
-
 
       if (documentIds !== undefined) {
         if (Array.isArray(documentIds)) {
@@ -413,16 +500,19 @@ export class ShipmentController {
             carrierCost: parseFloat(acc.carrierCost) || 0, notes: acc.notes,
             _id: acc._id && mongoose.Types.ObjectId.isValid(acc._id) ? new mongoose.Types.ObjectId(acc._id) : new mongoose.Types.ObjectId()
           })).filter((acc: any) => mongoose.Types.ObjectId.isValid(acc.accessorialTypeId));
-        } else { delete shipmentDataToUpdate.accessorials; }
+        } else if (accessorialsData === null) {
+            shipmentDataToUpdate.accessorials = []; 
+        } else { 
+            delete shipmentDataToUpdate.accessorials; 
+        }
       }
 
+      if (shipmentPayload.hasOwnProperty('fscType')) shipmentDataToUpdate.fscType = fscType === '' ? undefined : fscType;
+      if (shipmentPayload.hasOwnProperty('fscCustomerAmount')) shipmentDataToUpdate.fscCustomerAmount = (fscCustomerAmount === '' || fscCustomerAmount === null) ? undefined : parseFloat(fscCustomerAmount);
+      if (shipmentPayload.hasOwnProperty('fscCarrierAmount')) shipmentDataToUpdate.fscCarrierAmount = (fscCarrierAmount === '' || fscCarrierAmount === null) ? undefined : parseFloat(fscCarrierAmount);
 
-      if (fscType !== undefined) shipmentDataToUpdate.fscType = fscType === '' ? undefined : fscType; else if (shipmentPayload.hasOwnProperty('fscType') && fscType === null) shipmentDataToUpdate.fscType = undefined;
-      if (fscCustomerAmount !== undefined) shipmentDataToUpdate.fscCustomerAmount = (fscCustomerAmount === '' || fscCustomerAmount === null) ? undefined : parseFloat(fscCustomerAmount); else if (shipmentPayload.hasOwnProperty('fscCustomerAmount') && fscCustomerAmount === null) shipmentDataToUpdate.fscCustomerAmount = undefined;
-      if (fscCarrierAmount !== undefined) shipmentDataToUpdate.fscCarrierAmount = (fscCarrierAmount === '' || fscCarrierAmount === null) ? undefined : parseFloat(fscCarrierAmount); else if (shipmentPayload.hasOwnProperty('fscCarrierAmount') && fscCarrierAmount === null) shipmentDataToUpdate.fscCarrierAmount = undefined;
-
-      if (chassisCustomerCost !== undefined) shipmentDataToUpdate.chassisCustomerCost = (chassisCustomerCost === '' || chassisCustomerCost === null) ? undefined : parseFloat(chassisCustomerCost); else if (shipmentPayload.hasOwnProperty('chassisCustomerCost') && chassisCustomerCost === null) shipmentDataToUpdate.chassisCustomerCost = undefined;
-      if (chassisCarrierCost !== undefined) shipmentDataToUpdate.chassisCarrierCost = (chassisCarrierCost === '' || chassisCarrierCost === null) ? undefined : parseFloat(chassisCarrierCost); else if (shipmentPayload.hasOwnProperty('chassisCarrierCost') && chassisCarrierCost === null) shipmentDataToUpdate.chassisCarrierCost = undefined;
+      if (shipmentPayload.hasOwnProperty('chassisCustomerCost')) shipmentDataToUpdate.chassisCustomerCost = (chassisCustomerCost === '' || chassisCustomerCost === null) ? undefined : parseFloat(chassisCustomerCost);
+      if (shipmentPayload.hasOwnProperty('chassisCarrierCost')) shipmentDataToUpdate.chassisCarrierCost = (chassisCarrierCost === '' || chassisCarrierCost === null) ? undefined : parseFloat(chassisCarrierCost);
 
 
       const dateFieldsToUpdate: (keyof Partial<IShipment>)[] = ['lastFreeDayPort', 'lastFreeDayRail', 'emptyContainerReturnByDate', 'chassisReturnByDate', 'transloadDate', 'scheduledPickupDate', 'scheduledDeliveryDate', 'actualPickupDateTime', 'actualDeliveryDateTime', 'quoteValidUntil'];
@@ -436,14 +526,6 @@ export class ShipmentController {
         return;
       }
       logger.info('Shipment updated successfully', { shipmentId: updatedShipmentDocument._id });
-
-      if (updatedShipmentDocument.status === 'quote' || updatedShipmentDocument.status === 'booked') {
-        try {
-          await laneRateService.recordLaneRateFromShipment(updatedShipmentDocument);
-        } catch (laneRateError: any) {
-          logger.error(`Failed to record lane rate for updated shipment ${updatedShipmentDocument.shipmentNumber}: ${laneRateError.message}`);
-        }
-      }
       
       const populatedShipment = await Shipment.findById(updatedShipmentDocument._id)
         .populate({ path: 'shipper', select: 'name' }).populate({ path: 'carrier', select: 'name' })
@@ -461,10 +543,13 @@ export class ShipmentController {
     }
   }
 
-  async getShipmentById(req: Request, res: Response): Promise<void> {
+  async getShipmentById(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`Attempting to get shipment by ID: ${id}`);
-    if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid shipment ID format.' }); return; }
+    if (!mongoose.Types.ObjectId.isValid(id)) { 
+        res.status(400).json({ success: false, message: 'Invalid shipment ID format.' }); 
+        return; 
+    }
     try {
         const shipment = await Shipment.findById(id)
             .populate({ path: 'shipper', select: 'name contact _id' })
@@ -475,28 +560,42 @@ export class ShipmentController {
             .populate({ path: 'documents', select: 'originalName mimetype size createdAt path _id'})
             .populate({ path: 'accessorials.accessorialTypeId', model: 'AccessorialType', select: 'name code unitName defaultCustomerRate defaultCarrierCost' })
             .lean();
-        if (!shipment) { res.status(404).json({ success: false, message: 'Shipment not found.' }); return; }
+        if (!shipment) { 
+            res.status(404).json({ success: false, message: 'Shipment not found.' }); 
+            return; 
+        }
         logger.info(`Successfully fetched shipment ID: ${id}`);
         res.status(200).json({ success: true, data: shipment });
-    } catch (error: any) { logger.error(`Error fetching shipment by ID ${id}:`, { message: error.message, stack: error.stack }); res.status(500).json({ success: false, message: 'Error fetching shipment details.', errorDetails: error.message });}
+    } catch (error: any) { 
+        logger.error(`Error fetching shipment by ID ${id}:`, { message: error.message, stack: error.stack }); 
+        res.status(500).json({ success: false, message: 'Error fetching shipment details.', errorDetails: error.message });
+    }
   }
 
-  async addCheckIn(req: Request, res: Response): Promise<void> {
+  async addCheckIn(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`Attempting to add check-in for shipment ID: ${id}`, { body: req.body });
     try {
-      if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid shipment ID.'}); return;}
+      if (!mongoose.Types.ObjectId.isValid(id)) { 
+        res.status(400).json({ success: false, message: 'Invalid shipment ID.'}); 
+        return;
+      }
       const checkInData = { ...req.body };
 
       if (!checkInData.method || !checkInData.notes || !checkInData.dateTime) {
-        return res.status(400).json({ success: false, message: "Date/Time, Method, and Notes are required for check-in."})
+        res.status(400).json({ success: false, message: "Date/Time, Method, and Notes are required for check-in."});
+        return;
       }
-      if (!checkInData.createdBy && req.user) {
-          checkInData.createdBy = (req.user as any)._id;
+      if (!checkInData.createdBy && req.user?._id) {
+          checkInData.createdBy = req.user._id;
       } else if (!checkInData.createdBy) {
-          const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id');
-          if (defaultUser) checkInData.createdBy = defaultUser._id;
-          else { logger.error("Cannot add check-in: createdBy field is missing and no default user found."); return res.status(400).json({ success: false, message: "User information missing for check-in." }); }
+          const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id').lean();
+          if (defaultUser) checkInData.createdBy = defaultUser._id.toString();
+          else { 
+            logger.error("Cannot add check-in: createdBy field is missing and no default user found."); 
+            res.status(400).json({ success: false, message: "User information missing for check-in." }); 
+            return; 
+          }
       } else if (typeof checkInData.createdBy === 'string' && mongoose.Types.ObjectId.isValid(checkInData.createdBy)){
           checkInData.createdBy = new mongoose.Types.ObjectId(checkInData.createdBy);
       }
@@ -504,7 +603,10 @@ export class ShipmentController {
       const shipment = await Shipment.findByIdAndUpdate(id, { $push: { checkIns: checkInData } }, { new: true, runValidators: true })
         .populate({ path: 'shipper', select: 'name' }).populate({ path: 'carrier', select: 'name' })
         .populate({ path: 'checkIns.createdBy', select: 'firstName lastName email' }).lean();
-      if (!shipment) { res.status(404).json({ success: false, message: 'Shipment not found' }); return; }
+      if (!shipment) { 
+        res.status(404).json({ success: false, message: 'Shipment not found' }); 
+        return; 
+      }
       logger.info('Check-in added successfully for shipment ID:', id);
       res.status(200).json({ success: true, data: shipment, message: 'Check-in added successfully' });
     } catch (error: any) {
@@ -512,26 +614,21 @@ export class ShipmentController {
       res.status(500).json({ success: false, message: 'Error adding check-in', errorDetails: error.message });
     }
   }
-
-  async deleteShipment(req: Request, res: Response): Promise<void> {
+  
+  async deleteShipment(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`Attempting to delete shipment/quote with ID: ${id}`);
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      res.status(400).json({ success: false, message: 'Invalid ID format.' }); return;
+      res.status(400).json({ success: false, message: 'Invalid ID format.' }); 
+      return;
     }
     try {
       const shipment = await Shipment.findById(id);
       if (!shipment) {
-        res.status(404).json({ success: false, message: 'Shipment or Quote not found.' }); return;
+        res.status(404).json({ success: false, message: 'Shipment or Quote not found.' }); 
+        return;
       }
       await Shipment.findByIdAndDelete(id);
-      try {
-        await LaneRate.deleteMany({ sourceShipmentId: new mongoose.Types.ObjectId(id) });
-        logger.info(`Deleted related lane rates for shipment ID: ${id}`);
-      } catch(laneRateDeleteError: any) {
-        logger.error(`Error deleting related lane rates for shipment ${id}: ${laneRateDeleteError.message}`);
-      }
-
       logger.info(`Shipment/Quote with ID: ${id} deleted successfully.`);
       res.status(200).json({ success: true, message: 'Shipment/Quote deleted successfully.' });
     } catch (error: any) {
@@ -540,36 +637,57 @@ export class ShipmentController {
     }
   }
 
-  async generateStatusEmail(req: Request, res: Response): Promise<void> {
+  async generateStatusEmail(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`Attempting to generate status email for shipment ID: ${id}`);
     try {
       const aiService = getAIEmailService();
-      if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid shipment ID.'}); return; }
+      if (!mongoose.Types.ObjectId.isValid(id)) { 
+        res.status(400).json({ success: false, message: 'Invalid shipment ID.'}); 
+        return; 
+      }
       const shipment = await Shipment.findById(id).populate({ path: 'shipper', select: 'name contact' }).populate({ path: 'carrier', select: 'name' }).lean();
-      if (!shipment) { res.status(404).json({ success: false, message: 'Shipment not found' }); return; }
-      if (!process.env.OPENAI_API_KEY) { return res.status(503).json({ success: false, message: 'AI Service not configured properly (Missing API Key).' }); }
+      if (!shipment) { 
+        res.status(404).json({ success: false, message: 'Shipment not found' }); 
+        return; 
+      }
+      // Ensure OPENAI_API_KEY is accessed correctly
+      if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === '') { 
+        logger.error('OPENAI_API_KEY is not set or is empty.');
+        res.status(503).json({ success: false, message: 'AI Service not configured properly (Missing API Key).' }); 
+        return; 
+      }
       const emailContent = await aiService.generateStatusUpdate(shipment);
       logger.info('Status email content generated for shipment ID:', id);
       res.status(200).json({ success: true, data: { emailContent, shipmentNumber: shipment.shipmentNumber, shipmentForContext: shipment } });
     } catch (error: any) {
       logger.error('CRITICAL ERROR in generateStatusEmail:', { message: error.message, name: error.name, stack: error.stack, params: req.params, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2) });
       if (error.message && (error.message.includes('API key') || error.message.includes('OpenAI') || error.message.includes('AIEmailService could not be initialized'))) {
-          return res.status(503).json({ success: false, message: 'Error with AI service.', errorDetails: error.message });
+          res.status(503).json({ success: false, message: 'Error with AI service.', errorDetails: error.message });
+          return; 
       }
       res.status(500).json({ success: false, message: 'Error generating status email', errorDetails: error.message });
     }
   }
 
-  async updateShipmentTags(req: Request, res: Response): Promise<void> {
+  async updateShipmentTags(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`Attempting to update tags for shipment ID: ${id}`, { body: req.body });
     try {
-      if (!mongoose.Types.ObjectId.isValid(id)) {  res.status(400).json({ success: false, message: 'Invalid shipment ID.'}); return;}
+      if (!mongoose.Types.ObjectId.isValid(id)) {  
+        res.status(400).json({ success: false, message: 'Invalid shipment ID.'}); 
+        return;
+      }
       const { tags } = req.body;
-      if (!Array.isArray(tags)) { res.status(400).json({ success: false, message: 'Tags must be an array.' }); return; }
+      if (!Array.isArray(tags)) { 
+        res.status(400).json({ success: false, message: 'Tags must be an array.' }); 
+        return; 
+      }
       const shipment = await Shipment.findByIdAndUpdate(id, { customTags: tags }, { new: true, runValidators: true }).lean();
-      if (!shipment) { res.status(404).json({ success: false, message: 'Shipment not found' }); return; }
+      if (!shipment) { 
+        res.status(404).json({ success: false, message: 'Shipment not found' }); 
+        return; 
+      }
       logger.info('Tags updated successfully for shipment ID:', id);
       res.status(200).json({ success: true, data: shipment, message: 'Tags updated successfully' });
     } catch (error: any) {

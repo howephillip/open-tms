@@ -2,7 +2,7 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 import { Shipper, IShipper } from '../models/Shipper';
-import { Shipment } from '../models/Shipment'; // Import Shipment to check for relations
+import { Shipment } from '../models/Shipment'; // Corrected import
 import { logger } from '../utils/logger';
 
 const parseSortQuery = (sortQueryString?: string): Record<string, 1 | -1> => {
@@ -103,8 +103,6 @@ export class ShipperController {
       else {
         if (!billingInfo.invoiceEmail) missing.push("billing invoice email");
         if (!billingInfo.paymentTerms) missing.push("billing payment terms"); 
-        // creditLimit can be 0, so check for undefined if it's strictly required to be passed
-        // if (billingInfo.creditLimit === undefined) missing.push("billing credit limit");
       }
 
       if (missing.length > 0) {
@@ -122,17 +120,20 @@ export class ShipperController {
         newShipperData.billingInfo!.creditLimit = parseFloat(billingInfo.creditLimit) || 0;
       }
 
-
       const newShipper = new Shipper(newShipperData);
       await newShipper.save();
       logger.info('Shipper created successfully', { shipperId: newShipper._id });
 
       res.status(201).json({ success: true, message: 'Shipper created successfully', data: newShipper });
     } catch (error: any) {
-      logger.error('CRITICAL ERROR in createShipper:', { message: error.message, name: error.name, requestBody: req.body }); // Removed stack for brevity in this case
+      logger.error('CRITICAL ERROR in createShipper:', { message: error.message, name: error.name, requestBody: req.body });
        if (error.name === 'ValidationError') res.status(400).json({ success: false, message: 'Validation Error creating shipper', errors: error.errors });
-      else if (error.code === 11000) res.status(409).json({ success: false, message: 'A shipper with similar unique fields (e.g., name) might already exist.', errorDetails: error.keyValue });
-       else res.status(500).json({ success: false, message: 'Error creating shipper', errorDetails: error.message });
+      else if (error.code === 11000) {
+        res.status(409).json({ success: false, message: 'A shipper with similar unique fields (e.g., name) might already exist.', errorDetails: error.keyValue });
+        // No return here, fall through to general error if not caught
+      } else {
+        res.status(500).json({ success: false, message: 'Error creating shipper', errorDetails: error.message });
+      }
     }
   }
 
@@ -140,9 +141,15 @@ export class ShipperController {
     logger.info(`Attempting to get shipper by ID: ${req.params.id}`);
     try {
         const { id } = req.params;
-        if (!mongoose.Types.ObjectId.isValid(id)) { res.status(400).json({ success: false, message: 'Invalid shipper ID format.'}); return; }
+        if (!mongoose.Types.ObjectId.isValid(id)) { 
+            res.status(400).json({ success: false, message: 'Invalid shipper ID format.'}); 
+            return; 
+        }
         const shipper = await Shipper.findById(id).lean();
-        if (!shipper) { res.status(404).json({ success: false, message: 'Shipper not found.' }); return; }
+        if (!shipper) { 
+            res.status(404).json({ success: false, message: 'Shipper not found.' }); 
+            return; 
+        }
         res.status(200).json({ success: true, data: shipper });
     } catch (error: any) {
         logger.error('Error in getShipperById:', { message: error.message, stack: error.stack, id: req.params.id });
@@ -199,10 +206,11 @@ export class ShipperController {
 
       if (activeShipmentsCount > 0) {
         logger.warn(`Attempt to delete shipper ID: ${id} with ${activeShipmentsCount} active shipments.`);
-        return res.status(409).json({
+        res.status(409).json({ // Removed return
           success: false,
           message: `Cannot delete shipper. It is associated with ${activeShipmentsCount} active shipment(s). Please reassign or cancel these shipments first.`
         });
+        return; // Added return
       }
       const shipper = await Shipper.findByIdAndDelete(id);
       if (!shipper) {

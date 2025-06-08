@@ -9,7 +9,7 @@ import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import { shipmentAPI, shipperAPI, carrierAPI, lookupAPI } from '../../services/api';
 import { toast } from 'react-toastify';
-// import mongoose from 'mongoose'; // THIS LINE SHOULD BE REMOVED OR COMMENTED OUT
+// import mongoose from 'mongoose'; // REMOVED - Not for frontend
 
 // Import child components
 import ShipmentFormDialog, { ShipmentFormDataForDialog } from './components/ShipmentFormDialog';
@@ -52,7 +52,8 @@ interface IReferenceNumberFE { type: string; value: string; _id?: string; }
 interface IDocumentStubFE { _id: string; originalName: string; mimetype?: string; path?: string; size?: number; createdAt?: string; }
 
 export interface Shipment {
-  _id: string; shipmentNumber: string; shipper: ShipperStub | string | null; carrier: CarrierStub | string | null;
+  _id: string; shipmentNumber?: string; // Made shipmentNumber optional for initial quote data
+  shipper: ShipperStub | string | null; carrier: CarrierStub | string | null;
   modeOfTransport: ModeOfTransportTypeLocal; status: StatusType;
   origin: { name?:string; city?: string; state?: string; address?: string; country?: string; locationType?: LocationTypeLocal; contactName?:string; contactPhone?:string; contactEmail?:string; notes?:string;};
   destination: { name?:string; city?: string; state?: string; address?: string; country?: string; locationType?: LocationTypeLocal; contactName?:string; contactPhone?:string; contactEmail?:string; notes?:string;};
@@ -153,6 +154,22 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
   const addCheckInMutation = useMutation( (data: { shipmentId: string, checkInData: Partial<CheckInFormDataForPage> }) => shipmentAPI.addCheckIn(data.shipmentId, data.checkInData), { onSuccess: (response) => { toast.success(response.data.message || "Check-in added!"); queryClient.invalidateQueries('shipmentsAndQuotes'); queryClient.invalidateQueries(['shipmentDetails', currentShipmentForAction?._id]); queryClient.invalidateQueries(['itemDetailsForEdit', currentShipmentForAction?._id]); setIsCheckInFormOpen(false); }, onError: (err: any) => {toast.error(err.response?.data?.message || "Error adding check-in.");}});
   const generateEmailMutation = useMutation( (shipmentId: string) => shipmentAPI.generateEmail(shipmentId), { onSuccess: (response) => { setGeneratedEmailContent(response.data.data.emailContent); const shipmentContext = response.data.data.shipmentForContext || displayItems.find(s => s._id === shipmentId); setCurrentShipmentForAction(shipmentContext || null); setIsEmailGenOpen(true); }, onError: (err: any) => {toast.error(err.response?.data?.message || "Error generating email.");}});
 
+  const deleteItemMutation = useMutation(
+    (itemId: string) => shipmentAPI.delete(itemId),
+    {
+      onSuccess: (response, itemId) => {
+        toast.success(response?.data?.message || `Item deleted successfully!`);
+        queryClient.invalidateQueries('shipmentsAndQuotes');
+        queryClient.invalidateQueries(['shipmentDetails', itemId]); // Invalidate specific item cache
+        queryClient.invalidateQueries(['itemDetailsForEdit', itemId]);
+      },
+      onError: (error: any, itemId) => {
+        toast.error(error.response?.data?.message || `Error deleting item.`);
+        console.error("Delete Item error:", error.response?.data || error.message);
+      },
+    }
+  );
+
   const handleTabChange = (event: React.SyntheticEvent, newValue: 'shipments' | 'quotes') => { setActiveTab(newValue); };
 
   const handleOpenFormDialog = (itemToEdit?: Shipment) => {
@@ -205,7 +222,7 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
                 customerRate: acc.customerRate,
                 carrierCost: acc.carrierCost,
                 notes: acc.notes,
-                _id: acc._id ? acc._id : undefined // Pass string _id if it exists, otherwise undefined
+                _id: acc._id ? acc._id : undefined
             })),
             quoteNotes: quoteData.quoteNotes, quoteValidUntil: quoteData.quoteValidUntil ? new Date(quoteData.quoteValidUntil).toISOString() : undefined,
             purchaseOrderNumbers: quoteData.purchaseOrderNumbers?.split(',').map(po => po.trim()).filter(po => po) || [],
@@ -254,6 +271,13 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
           if (!apiPayload.scheduledDeliveryTime?.trim()) delete apiPayload.scheduledDeliveryTime;
     }
     itemMutation.mutate({ id: idToUpdate || formDataFromDialog._id, formData: apiPayload });
+  };
+
+  // --- ADDED: Delete Handler ---
+  const handleDeleteItem = (itemToDelete: Shipment) => {
+    if (window.confirm(`Are you sure you want to delete ${activeTab === 'quotes' ? 'quote' : 'shipment'} #${itemToDelete.shipmentNumber || itemToDelete._id}? This action cannot be undone.`)) {
+      deleteItemMutation.mutate(itemToDelete._id);
+    }
   };
 
   const handleOpenCheckInForm = (item: Shipment) => { setCurrentShipmentForAction(item); setCheckInFormDataForDialog({...initialCheckInFormDataState, dateTime: new Date().toISOString().substring(0,16)}); setIsCheckInFormOpen(true);};
@@ -323,10 +347,16 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
       </Box>
 
       <ShipmentsTable
-        items={displayItems} isLoading={isLoadingItems} activeTab={activeTab}
-        onEditItem={handleOpenFormDialog} onViewDetails={handleOpenDetailView}
-        onAddCheckIn={handleOpenCheckInForm} onGenerateEmail={handleGenerateEmail}
-        getDisplayName={getDisplayName} getStatusColor={getStatusColor}
+        items={displayItems}
+        isLoading={isLoadingItems}
+        activeTab={activeTab}
+        onEditItem={handleOpenFormDialog}
+        onViewDetails={handleOpenDetailView}
+        onAddCheckIn={handleOpenCheckInForm}
+        onGenerateEmail={handleGenerateEmail}
+        onDeleteItem={handleDeleteItem}
+        getDisplayName={getDisplayName}
+        getStatusColor={getStatusColor}
       />
 
       {isShipmentFormOpen && editingShipmentInitialData && (
@@ -345,6 +375,7 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
             shippersList={shippersList} isLoadingShippers={isLoadingShippers}
             carriersList={carriersList} isLoadingCarriers={isLoadingCarriers}
             equipmentTypesList={equipmentTypesList} isLoadingEquipmentTypes={isLoadingEquipmentTypes}
+            // modeOfTransportOptions and locationTypeOptions are now imported directly by QuoteFormDialog
         />
       )}
 

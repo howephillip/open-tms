@@ -1,12 +1,14 @@
 // File: backend/src/controllers/laneRateController.ts
-import { Request, Response } from 'express';
+import { Response } from 'express';
+import { AuthenticatedRequest } from '../types/AuthenticatedRequest';
 import mongoose from 'mongoose';
 import { LaneRate, ILaneRate, IManualAccessorial } from '../models/LaneRate';
-import { User } from '../models/User'; // For createdBy in manual entries
-import { Shipment } from '../models/Shipment'; // For populating shipment accessorials
+import { User, IUser } from '../models/User'; // IMPORT IUser
+import { IShipment } from '../models/Shipment';
 import { logger } from '../utils/logger';
 
 const parseSortQuery = (sortQueryString?: string, defaultSort: Record<string, 1 | -1> = { rateDate: -1 }): Record<string, 1 | -1> => {
+    // ... (implementation)
     if (!sortQueryString) return defaultSort;
     const sortOptions: Record<string, 1 | -1> = {};
     sortQueryString.split(',').forEach(part => {
@@ -22,7 +24,8 @@ const parseSortQuery = (sortQueryString?: string, defaultSort: Record<string, 1 
 
 export class LaneRateController {
 
-  async getLaneRateSummary(req: Request, res: Response): Promise<void> {
+  async getLaneRateSummary(req: AuthenticatedRequest, res: Response): Promise<void> {
+    // ... (implementation from previous correct version)
     logger.info('Fetching lane rate summary. Query:', req.query);
     try {
       const {
@@ -55,8 +58,9 @@ export class LaneRateController {
         ];
         const existingFilterKeys = Object.keys(matchStage).filter(k => k !== 'isActive');
         if (existingFilterKeys.length > 0) {
-            matchStage.$and = matchStage.$and || [];
-            matchStage.$and.push({ $or: searchOrConditions });
+            const currentFilters = {...matchStage};
+            delete currentFilters.$and;
+            matchStage.$and = [currentFilters, { $or: searchOrConditions }];
         } else {
             matchStage.$or = searchOrConditions;
         }
@@ -114,7 +118,8 @@ export class LaneRateController {
     }
   }
 
-  async getLaneRateDetail(req: Request, res: Response): Promise<void> {
+
+  async getLaneRateDetail(req: AuthenticatedRequest, res: Response): Promise<void> {
     const {
       originCity, originState, destinationCity, destinationState,
       originZip, destinationZip,
@@ -150,9 +155,32 @@ export class LaneRateController {
       if (modeOfTransport && typeof modeOfTransport === 'string') query.modeOfTransport = modeOfTransport;
       if (equipmentType && typeof equipmentType === 'string') query.equipmentType = { $regex: equipmentType, $options: 'i' };
 
+      type PopulatedLeanAccessorialType = { name?: string; code?: string; _id?: string | mongoose.Types.ObjectId; };
+      type PopulatedLeanQuoteAccessorial = {
+          _id?: string | mongoose.Types.ObjectId;
+          accessorialTypeId?: PopulatedLeanAccessorialType | string | mongoose.Types.ObjectId;
+          name?: string;
+          carrierCost?: number;
+          quantity?: number;
+          notes?: string;
+      };
+      type PopulatedLeanSourceShipment = Partial<Omit<IShipment, 'accessorials' | '_id'>> & {
+        _id: string | mongoose.Types.ObjectId;
+        accessorials?: PopulatedLeanQuoteAccessorial[];
+      };
+      type LeanLaneRateWithPopulatedSource = Omit<ILaneRate, 'sourceShipmentId' | '_id' | 'carrier' | 'createdBy' | 'updatedBy' | 'manualAccessorials'> & {
+        _id: string | mongoose.Types.ObjectId;
+        carrier: (Partial<IUser> & { _id: string | mongoose.Types.ObjectId}) | string | mongoose.Types.ObjectId | null; // Use IUser
+        createdBy: (Partial<IUser> & { _id: string | mongoose.Types.ObjectId}) | string | mongoose.Types.ObjectId;    // Use IUser
+        updatedBy?: (Partial<IUser> & { _id: string | mongoose.Types.ObjectId}) | string | mongoose.Types.ObjectId | null; // Use IUser
+        sourceShipmentId?: PopulatedLeanSourceShipment | null;
+        manualAccessorials?: Array<Partial<IManualAccessorial> & {_id: string | mongoose.Types.ObjectId}>;
+      };
+
       const laneRates = await LaneRate.find(query)
         .populate('carrier', 'name mcNumber')
         .populate('createdBy', 'firstName lastName email')
+        .populate('updatedBy', 'firstName lastName email')
         .populate({
             path: 'sourceShipmentId',
             select: 'shipmentNumber status accessorials',
@@ -165,25 +193,36 @@ export class LaneRateController {
         .sort(sortOptions)
         .limit(limitNum)
         .skip((pageNum - 1) * limitNum)
-        .lean();
+        .lean() as LeanLaneRateWithPopulatedSource[];
 
       const total = await LaneRate.countDocuments(query);
 
       const processedLaneRates = laneRates.map(lr => {
-        let displayAccessorials: { name: string, cost: number, notes?: string }[] = [];
+        let displayAccessorials: { name: string, cost: number, notes?: string, _id?: string }[] = [];
+        const sourceShipment = lr.sourceShipmentId;
+
         if (lr.sourceType === 'MANUAL_ENTRY' && lr.manualAccessorials && lr.manualAccessorials.length > 0) {
           displayAccessorials = lr.manualAccessorials.map(ma => ({
-            name: ma.name,
-            cost: ma.cost,
+            _id: ma._id?.toString(),
+            name: ma.name || 'Unnamed Accessorial',
+            cost: ma.cost || 0,
             notes: ma.notes
           }));
-        } else if (lr.sourceType === 'TMS_SHIPMENT' && lr.sourceShipmentId && (lr.sourceShipmentId as any).accessorials) {
-          const shipmentAccessorials = (lr.sourceShipmentId as any).accessorials;
-          displayAccessorials = shipmentAccessorials.map((sa: any) => ({
-            name: (sa.accessorialTypeId as any)?.name || sa.name || 'Unknown Accessorial',
-            cost: (sa.carrierCost || 0) * (sa.quantity || 1),
-            notes: sa.notes
-          }));
+        } else if (lr.sourceType === 'TMS_SHIPMENT' && sourceShipment && Array.isArray(sourceShipment.accessorials)) {
+            displayAccessorials = sourceShipment.accessorials.map((sa) => {
+                let accName = 'Unknown Accessorial';
+                if (sa.accessorialTypeId && typeof sa.accessorialTypeId === 'object' && 'name' in sa.accessorialTypeId) {
+                    accName = (sa.accessorialTypeId as PopulatedLeanAccessorialType).name || accName;
+                } else if (sa.name) {
+                    accName = sa.name;
+                }
+                return {
+                    _id: sa._id?.toString(),
+                    name: accName,
+                    cost: (sa.carrierCost || 0) * (sa.quantity || 1),
+                    notes: sa.notes
+                };
+            });
         }
         return { ...lr, displayAccessorials };
       });
@@ -196,12 +235,12 @@ export class LaneRateController {
         }
       });
     } catch (error: any) {
-      logger.error('Error fetching lane rate details:', { message: error.message, stack: error.stack });
+      logger.error('Error fetching lane rate details:', { message: error.message, stack: error.stack, query: req.query });
       res.status(500).json({ success: false, message: 'Error fetching lane rate details', errorDetails: error.message });
     }
   }
 
-  async getLaneRatesByCarrier(req: Request, res: Response): Promise<void> {
+  async getLaneRatesByCarrier(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { carrierId } = req.params;
     const { page = '1', limit = '25', sort = '-rateDate' } = req.query;
     logger.info(`Fetching lane rates for carrier ID: ${carrierId}. Query:`, req.query);
@@ -216,9 +255,33 @@ export class LaneRateController {
       const sortOptions = parseSortQuery(sort as string);
 
       const query = { carrier: new mongoose.Types.ObjectId(carrierId), isActive: true };
+      
+      type PopulatedLeanAccessorialType = { name?: string; code?: string; _id?: string | mongoose.Types.ObjectId; };
+      type PopulatedLeanQuoteAccessorial = {
+          _id?: string | mongoose.Types.ObjectId;
+          accessorialTypeId?: PopulatedLeanAccessorialType | string | mongoose.Types.ObjectId;
+          name?: string;
+          carrierCost?: number;
+          quantity?: number;
+          notes?: string;
+      };
+      type PopulatedLeanSourceShipment = Partial<Omit<IShipment, 'accessorials' | '_id'>> & {
+        _id: string | mongoose.Types.ObjectId;
+        accessorials?: PopulatedLeanQuoteAccessorial[];
+      };
+      type LeanLaneRateWithPopulatedSource = Omit<ILaneRate, 'sourceShipmentId' | '_id' | 'carrier' | 'createdBy' | 'updatedBy' | 'manualAccessorials'> & {
+        _id: string | mongoose.Types.ObjectId;
+        carrier: (Partial<IUser> & { _id: string | mongoose.Types.ObjectId}) | string | mongoose.Types.ObjectId | null; // Use IUser
+        createdBy: (Partial<IUser> & { _id: string | mongoose.Types.ObjectId}) | string | mongoose.Types.ObjectId;    // Use IUser
+        updatedBy?: (Partial<IUser> & { _id: string | mongoose.Types.ObjectId}) | string | mongoose.Types.ObjectId | null; // Use IUser
+        sourceShipmentId?: PopulatedLeanSourceShipment | null;
+        manualAccessorials?: Array<Partial<IManualAccessorial> & {_id: string | mongoose.Types.ObjectId}>;
+      };
+
 
       const laneRates = await LaneRate.find(query)
         .populate('createdBy', 'firstName lastName')
+        .populate('updatedBy', 'firstName lastName email')
         .populate({
             path: 'sourceShipmentId',
             select: 'shipmentNumber status accessorials',
@@ -231,21 +294,30 @@ export class LaneRateController {
         .sort(sortOptions)
         .limit(limitNum)
         .skip((pageNum - 1) * limitNum)
-        .lean();
+        .lean() as LeanLaneRateWithPopulatedSource[];
 
       const total = await LaneRate.countDocuments(query);
 
       const processedLaneRates = laneRates.map(lr => {
-        let displayAccessorials: { name: string, cost: number, notes?: string }[] = [];
+        let displayAccessorials: { name: string, cost: number, notes?: string, _id?: string }[] = [];
+        const sourceShipment = lr.sourceShipmentId;
         if (lr.sourceType === 'MANUAL_ENTRY' && lr.manualAccessorials && lr.manualAccessorials.length > 0) {
-          displayAccessorials = lr.manualAccessorials.map(ma => ({ name: ma.name, cost: ma.cost, notes: ma.notes }));
-        } else if (lr.sourceType === 'TMS_SHIPMENT' && lr.sourceShipmentId && (lr.sourceShipmentId as any).accessorials) {
-          const shipmentAccessorials = (lr.sourceShipmentId as any).accessorials;
-          displayAccessorials = shipmentAccessorials.map((sa: any) => ({
-            name: (sa.accessorialTypeId as any)?.name || sa.name || 'Unknown Accessorial',
-            cost: (sa.carrierCost || 0) * (sa.quantity || 1),
-            notes: sa.notes
-          }));
+          displayAccessorials = lr.manualAccessorials.map(ma => ({ _id: ma._id?.toString(), name: ma.name || 'Unnamed', cost: ma.cost || 0, notes: ma.notes }));
+        } else if (lr.sourceType === 'TMS_SHIPMENT' && sourceShipment && Array.isArray(sourceShipment.accessorials)) {
+           displayAccessorials = sourceShipment.accessorials.map((sa) => {
+              let accName = 'Unknown Accessorial';
+              if (sa.accessorialTypeId && typeof sa.accessorialTypeId === 'object' && 'name' in sa.accessorialTypeId) {
+                  accName = (sa.accessorialTypeId as PopulatedLeanAccessorialType).name || accName;
+              } else if (sa.name) {
+                  accName = sa.name;
+              }
+              return {
+                _id: sa._id?.toString(),
+                name: accName,
+                cost: (sa.carrierCost || 0) * (sa.quantity || 1),
+                notes: sa.notes
+              };
+            });
         }
         return { ...lr, displayAccessorials };
       });
@@ -263,7 +335,7 @@ export class LaneRateController {
     }
   }
 
-  async createManualLaneRate(req: Request, res: Response): Promise<void> {
+  async createManualLaneRate(req: AuthenticatedRequest, res: Response): Promise<void> {
     logger.info('Attempting to create manual lane rate:', req.body);
     try {
       const {
@@ -276,15 +348,16 @@ export class LaneRateController {
       } = req.body;
 
       let createdByUserId = req.body.createdBy;
-      if (!createdByUserId && (req as any).user && (req as any).user._id) {
-        createdByUserId = (req as any).user._id;
+      if (!createdByUserId && req.user?._id) {
+        createdByUserId = req.user._id.toString();
       } else if (!createdByUserId) {
         const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id').lean();
         if (defaultUser) {
             createdByUserId = defaultUser._id.toString();
         } else {
             logger.error('CRITICAL: createdBy field missing for manual lane rate and no default user found.');
-            return res.status(400).json({ success: false, message: 'User context (createdBy) is missing and no default available.' });
+            res.status(400).json({ success: false, message: 'User context (createdBy) is missing and no default available.' });
+            return;
         }
       }
 
@@ -294,21 +367,24 @@ export class LaneRateController {
       if (!destinationCity) missing.push('destinationCity');
       if (!destinationState) missing.push('destinationState');
       if (!carrier) missing.push('carrier (ID)');
-      if (lineHaulCost === undefined || lineHaulCost === null) missing.push('lineHaulCost');
+      if (lineHaulCost === undefined || lineHaulCost === null || lineHaulCost === '') missing.push('lineHaulCost');
       if (!modeOfTransport) missing.push('modeOfTransport');
       if (!createdByUserId) missing.push('createdBy (user ID)');
 
 
       if (missing.length > 0) {
         logger.warn(`Validation failed for manual lane rate creation. Missing: ${missing.join(', ')}`, { body: req.body });
-        return res.status(400).json({ success: false, message: `Missing required fields: ${missing.join(', ')}.` });
+        res.status(400).json({ success: false, message: `Missing required fields: ${missing.join(', ')}.` });
+        return;
       }
 
       if (!mongoose.Types.ObjectId.isValid(carrier)) {
-         return res.status(400).json({ success: false, message: 'Invalid Carrier ID format.' });
+         res.status(400).json({ success: false, message: 'Invalid Carrier ID format.' });
+         return;
       }
       if (!mongoose.Types.ObjectId.isValid(createdByUserId)) {
-         return res.status(400).json({ success: false, message: 'Invalid Created By User ID format.' });
+         res.status(400).json({ success: false, message: 'Invalid Created By User ID format.' });
+         return;
       }
 
       const laneRateEntryData: Partial<ILaneRate> = {
@@ -336,10 +412,11 @@ export class LaneRateController {
         laneRateEntryData.manualAccessorials = manualAccessorials
           .filter(acc => typeof acc.name === 'string' && acc.name.trim() !== '' && acc.cost !== undefined && acc.cost !== null)
           .map(acc => ({
+            _id: acc._id && mongoose.Types.ObjectId.isValid(acc._id) ? new mongoose.Types.ObjectId(acc._id) : new mongoose.Types.ObjectId(),
             name: acc.name.trim(),
-            cost: parseFloat(String(acc.cost)), // Ensure cost is parsed as number
+            cost: parseFloat(String(acc.cost)),
             notes: acc.notes || undefined,
-          })) as IManualAccessorial[];
+          } as IManualAccessorial));
       }
 
       const newLaneRate = new LaneRate(laneRateEntryData);
@@ -363,20 +440,21 @@ export class LaneRateController {
     }
   }
 
-  async updateManualLaneRate(req: Request, res: Response): Promise<void> {
-    const { laneRateId } = req.params;
-    logger.info(`Attempting to update lane rate ID: ${laneRateId}`, { body: req.body });
+  async updateManualLaneRate(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const { id } = req.params;
+    logger.info(`Attempting to update lane rate ID: ${id}`, { body: req.body });
 
-    if (!mongoose.Types.ObjectId.isValid(laneRateId)) {
-      return res.status(400).json({ success: false, message: 'Invalid LaneRate ID format.' });
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      res.status(400).json({ success: false, message: 'Invalid LaneRate ID format.' });
+      return;
     }
 
     try {
-      const existingLaneRate = await LaneRate.findById(laneRateId);
+      const existingLaneRate = await LaneRate.findById(id);
       if (!existingLaneRate) {
-        return res.status(404).json({ success: false, message: 'Lane rate entry not found.' });
+        res.status(404).json({ success: false, message: 'Lane rate entry not found.' });
+        return;
       }
-      // Removed the check for sourceType === 'MANUAL_ENTRY' to allow editing of all lane rates
 
       const {
         originCity, originState, destinationCity, destinationState,
@@ -387,25 +465,37 @@ export class LaneRateController {
         rateDate, rateValidUntil, equipmentType, notes, isActive
       } = req.body;
 
-      if (originCity === '' || originState === '' || destinationCity === '' || destinationState === '' || carrier === '' || lineHaulCost === '' || modeOfTransport === '') {
-          logger.warn(`Validation failed for lane rate update. Core fields cannot be empty. ID: ${laneRateId}`);
-          return res.status(400).json({ success: false, message: 'Core fields (Origin/Dest City & State, Carrier, Line Haul Cost, Mode) cannot be empty.' });
+      const coreUpdateMissing = [];
+      if (originCity === '') coreUpdateMissing.push('originCity');
+      if (originState === '') coreUpdateMissing.push('originState');
+      if (destinationCity === '') coreUpdateMissing.push('destinationCity');
+      if (destinationState === '') coreUpdateMissing.push('destinationState');
+      if (carrier === '') coreUpdateMissing.push('carrier');
+      if (lineHaulCost === '' || lineHaulCost === null || lineHaulCost === undefined) coreUpdateMissing.push('lineHaulCost');
+      if (modeOfTransport === '') coreUpdateMissing.push('modeOfTransport');
+
+      if (coreUpdateMissing.length > 0) {
+          logger.warn(`Validation failed for lane rate update. Core fields cannot be empty. ID: ${id}. Missing: ${coreUpdateMissing.join(', ')}`);
+          res.status(400).json({ success: false, message: `Core fields cannot be empty: ${coreUpdateMissing.join(', ')}.` });
+          return;
       }
       if (carrier && !mongoose.Types.ObjectId.isValid(carrier)) {
-         return res.status(400).json({ success: false, message: 'Invalid Carrier ID format for update.' });
+         res.status(400).json({ success: false, message: 'Invalid Carrier ID format for update.' });
+         return;
       }
 
       existingLaneRate.originCity = originCity;
       existingLaneRate.originState = originState;
       existingLaneRate.destinationCity = destinationCity;
       existingLaneRate.destinationState = destinationState;
-      if (carrier) existingLaneRate.carrier = new mongoose.Types.ObjectId(carrier); // Update carrier if provided
+      if (carrier) existingLaneRate.carrier = new mongoose.Types.ObjectId(carrier);
       existingLaneRate.lineHaulCost = parseFloat(lineHaulCost);
       existingLaneRate.modeOfTransport = modeOfTransport;
 
       existingLaneRate.originZip = originZip || undefined;
       existingLaneRate.destinationZip = destinationZip || undefined;
-      existingLaneRate.lineHaulRate = (lineHaulRate !== undefined && lineHaulRate !== null && lineHaulRate !== '') ? parseFloat(lineHaulRate) : undefined;
+      
+      existingLaneRate.lineHaulRate = (lineHaulRate !== 0 && lineHaulRate !== null && lineHaulRate !== '') ? parseFloat(lineHaulRate) : undefined;
       existingLaneRate.fscPercentage = (fscPercentage !== undefined && fscPercentage !== null && fscPercentage !== '') ? parseFloat(fscPercentage) : undefined;
       existingLaneRate.chassisCostCarrier = (chassisCostCarrier !== undefined && chassisCostCarrier !== null && chassisCostCarrier !== '') ? parseFloat(chassisCostCarrier) : undefined;
       existingLaneRate.chassisCostCustomer = (chassisCostCustomer !== undefined && chassisCostCustomer !== null && chassisCostCustomer !== '') ? parseFloat(chassisCostCustomer) : undefined;
@@ -416,25 +506,22 @@ export class LaneRateController {
       existingLaneRate.notes = notes || undefined;
       if (isActive !== undefined) existingLaneRate.isActive = isActive;
 
-
       if (Array.isArray(manualAccessorials)) {
         existingLaneRate.manualAccessorials = manualAccessorials
-          .filter(acc => typeof acc.name === 'string' && acc.name.trim() !== '' && acc.cost !== undefined && acc.cost !== null)
+          .filter(acc => typeof acc.name === 'string' && acc.name.trim() !== '' && acc.cost !== undefined && acc.cost !== null && acc.cost !== '')
           .map(acc => ({
+            _id: acc._id && mongoose.Types.ObjectId.isValid(acc._id) ? new mongoose.Types.ObjectId(acc._id) : new mongoose.Types.ObjectId(),
             name: acc.name.trim(),
             cost: parseFloat(String(acc.cost)),
             notes: acc.notes || undefined,
           })) as IManualAccessorial[];
-      } else {
+      } else if (manualAccessorials === null || (Array.isArray(manualAccessorials) && manualAccessorials.length === 0)) {
         existingLaneRate.manualAccessorials = [];
       }
 
-      if ((req as any).user && (req as any).user._id && mongoose.Types.ObjectId.isValid((req as any).user._id)) {
-          existingLaneRate.updatedBy = new mongoose.Types.ObjectId((req as any).user._id);
+      if (req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id.toString())) {
+          existingLaneRate.updatedBy = new mongoose.Types.ObjectId(req.user._id.toString());
       }
-      // When a TMS-derived rate is edited, its sourceType remains 'TMS_SHIPMENT'
-      // to indicate its origin, but its data is now manually overridden.
-      // You could add another flag like 'isManuallyOverridden: true' if needed.
 
       await existingLaneRate.save();
       logger.info('Lane rate updated successfully:', existingLaneRate._id);
@@ -448,7 +535,7 @@ export class LaneRateController {
       res.status(200).json({ success: true, data: populatedLaneRate, message: 'Lane rate updated.' });
 
     } catch (error: any) {
-      logger.error('Error updating lane rate:', { message: error.message, id: laneRateId, body: req.body, stack: error.stack });
+      logger.error('Error updating lane rate:', { message: error.message, id: id, body: req.body, stack: error.stack });
       if (error.name === 'ValidationError') {
         res.status(400).json({ success: false, message: error.message, errors: error.errors });
       } else {
@@ -457,24 +544,24 @@ export class LaneRateController {
     }
   }
 
-  async deleteLaneRate(req: Request, res: Response): Promise<void> {
-    const { laneRateId } = req.params;
-    logger.info(`Attempting to delete lane rate with ID: ${laneRateId}`);
+  async deleteLaneRate(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const { id } = req.params;
+    logger.info(`Attempting to delete lane rate with ID: ${id}`);
 
-    if (!mongoose.Types.ObjectId.isValid(laneRateId)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       res.status(400).json({ success: false, message: 'Invalid LaneRate ID format.' });
       return;
     }
     try {
-      const result = await LaneRate.findByIdAndDelete(laneRateId);
+      const result = await LaneRate.findByIdAndDelete(id);
       if (!result) {
         res.status(404).json({ success: false, message: 'Lane rate entry not found.' });
         return;
       }
-      logger.info(`Lane rate entry with ID: ${laneRateId} deleted successfully.`);
+      logger.info(`Lane rate entry with ID: ${id} deleted successfully.`);
       res.status(200).json({ success: true, message: 'Lane rate entry deleted successfully.' });
     } catch (error: any) {
-      logger.error('Error deleting lane rate entry:', { message: error.message, stack: error.stack, id: laneRateId });
+      logger.error('Error deleting lane rate entry:', { message: error.message, stack: error.stack, id: id });
       res.status(500).json({ success: false, message: 'Error deleting lane rate entry.', errorDetails: error.message });
     }
   }

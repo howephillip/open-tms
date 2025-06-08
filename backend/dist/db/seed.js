@@ -7,15 +7,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importDefault(require("mongoose"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const path_1 = __importDefault(require("path"));
+const fs_1 = __importDefault(require("fs")); // IMPORTED fs
 dotenv_1.default.config({ path: path_1.default.resolve(__dirname, '../../../.env') });
 const database_1 = require("../config/database");
 const User_1 = require("../models/User");
 const Shipper_1 = require("../models/Shipper");
 const Carrier_1 = require("../models/Carrier");
-const Shipment_1 = require("../models/Shipment");
+const Shipment_1 = require("../models/Shipment"); // Use named exports
 const Document_1 = require("../models/Document");
 const EquipmentType_1 = require("../models/EquipmentType");
-const AccessorialType_1 = require("../models/AccessorialType"); // IMPORTED
+const AccessorialType_1 = require("../models/AccessorialType");
+const ApplicationSettings_1 = require("../models/ApplicationSettings");
+const LaneRate_1 = require("../models/LaneRate");
 const logger_1 = require("../utils/logger");
 const connectDB = async () => {
     try {
@@ -35,12 +38,14 @@ const clearDatabase = async () => {
         await Shipment_1.Shipment.deleteMany({});
         await Document_1.Document.deleteMany({});
         await EquipmentType_1.EquipmentType.deleteMany({});
-        await AccessorialType_1.AccessorialType.deleteMany({}); // CLEAR ACCESSORIAL TYPES
+        await AccessorialType_1.AccessorialType.deleteMany({});
+        await ApplicationSettings_1.ApplicationSettings.deleteMany({});
+        await LaneRate_1.LaneRate.deleteMany({});
         logger_1.logger.info('Database cleared.');
     }
-    catch (error) { // Added type for error
+    catch (error) {
         logger_1.logger.error('Error clearing database:', error);
-        throw error; // Re-throw to stop seeding if clearing fails
+        throw error;
     }
 };
 const seedUsers = async () => {
@@ -48,7 +53,6 @@ const seedUsers = async () => {
         { firstName: 'Admin', lastName: 'User', email: 'admin@example.com', password: 'password123', role: 'admin' },
         { firstName: 'Dispatch', lastName: 'Person', email: 'dispatch@example.com', password: 'password123', role: 'dispatcher' },
     ];
-    // Use try-catch for individual seed functions for better error isolation
     try {
         const users = await User_1.User.create(usersData);
         logger_1.logger.info(`${users.length} users seeded.`);
@@ -56,7 +60,7 @@ const seedUsers = async () => {
     }
     catch (error) {
         logger_1.logger.error('Error seeding Users:', error);
-        return []; // Return empty or throw
+        return [];
     }
 };
 const seedShippers = async () => {
@@ -76,8 +80,8 @@ const seedShippers = async () => {
 };
 const seedCarriers = async () => {
     const carriersData = [
-        { name: 'Speedy Freightways', mcNumber: '123456', dotNumber: '1122334', address: { street: '789 Logistics Ave', city: 'Chicago', state: 'IL', zip: '60607' }, contact: { name: 'Mike Brown', phone: '312-555-0303', email: 'mike.brown@speedyfreight.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Satisfactory', status: 'Authorized for Property' }, equipment: ['Dry Van', 'Reefer'] },
-        { name: 'Reliable Transport', mcNumber: '654321', dotNumber: '4433221', address: { street: '321 Hauler Rd', city: 'Dallas', state: 'TX', zip: '75201' }, contact: { name: 'Laura Wilson', phone: '214-555-0404', email: 'laura.wilson@reliabletransport.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Conditional', status: 'Authorized for Property' }, equipment: ['Flatbed'] },
+        { name: 'Speedy Freightways', mcNumber: '123456', dotNumber: '1122334', address: { street: '789 Logistics Ave', city: 'Chicago', state: 'IL', zip: '60607' }, contact: { name: 'Mike Brown', phone: '312-555-0303', email: 'mike.brown@speedyfreight.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Satisfactory', status: 'Authorized for Property', insuranceInfo: {} }, equipment: ['Dry Van', 'Reefer'] },
+        { name: 'Reliable Transport', mcNumber: '654321', dotNumber: '4433221', address: { street: '321 Hauler Rd', city: 'Dallas', state: 'TX', zip: '75201' }, contact: { name: 'Laura Wilson', phone: '214-555-0404', email: 'laura.wilson@reliabletransport.com' }, saferData: { lastUpdated: new Date(), saferRating: 'Conditional', status: 'Authorized for Property', insuranceInfo: {} }, equipment: ['Flatbed'] },
     ];
     try {
         const carriers = await Carrier_1.Carrier.create(carriersData);
@@ -183,15 +187,14 @@ const seedShipments = async (shippers, carriers, users, equipmentTypes) => {
             billOfLadingNumber: 'MBL-SEAXYZ990', deliveryOrderNumber: "DO-LAX-556"
         },
         {
-            shipper: shippers[0]._id, createdBy: adminUser._id, // Carrier might not be assigned on a quote yet
-            // Let's assign a carrier for now for simplicity of data, but in real quote it could be null
-            carrier: carriers[0]._id,
+            shipper: shippers[0]._id, createdBy: adminUser._id,
+            carrier: carriers[0]._id, // Optional for quote, but provided for seed data simplicity
             modeOfTransport: 'truckload-ltl', status: 'quote',
             origin: { name: 'Supplier Dock A', address: '50 Manufacturing Row', city: 'Edison', state: 'NJ', zip: '08817', locationType: 'shipper_facility' },
             destination: { name: 'Customer Store #12', address: '75 Retail Plaza', city: 'Philadelphia', state: 'PA', zip: '19103', locationType: 'consignee_facility' },
             scheduledPickupDate: new Date('2024-08-20'), scheduledDeliveryDate: new Date('2024-08-21'),
             equipmentType: "LTL Van", commodityDescription: "3 Pallets - Mixed Goods", totalWeight: 1500, pieceCount: 3,
-            customerRate: 450, carrierCostTotal: 300, // Estimated costs for quote
+            customerRate: 450, carrierCostTotal: 300,
             quoteNotes: "Rate valid for 7 days. Subject to LTL carrier availability.", quoteValidUntil: new Date(new Date().setDate(new Date().getDate() + 7))
         }
     ];
@@ -207,8 +210,8 @@ const seedShipments = async (shippers, carriers, users, equipmentTypes) => {
 };
 const seedDocuments = async (users, shipments, carriers, shippers) => {
     const adminUser = users.find(u => u.role === 'admin');
-    if (!adminUser || shipments.length === 0 || carriers.length === 0) {
-        logger_1.logger.warn("Cannot seed documents due to missing admin user or shipments/carriers.");
+    if (!adminUser || shipments.length === 0 || carriers.length === 0) { // Added shippers check if relatedTo uses it
+        logger_1.logger.warn("Cannot seed documents due to missing admin user or shipments/carriers/shippers.");
         return [];
     }
     const documentsData = [
@@ -216,17 +219,17 @@ const seedDocuments = async (users, shipments, carriers, shippers) => {
         { filename: 'dummy_pod_01.jpg', originalName: 'POD_TMS-AUTO1.jpg', mimetype: 'image/jpeg', size: 204800, path: `uploads/dummy_pod_01.jpg`, tags: ['POD'], relatedTo: { type: 'shipment', id: shipments[0]?._id }, uploadedBy: adminUser._id },
         { filename: 'carrier_agreement_speedy.pdf', originalName: 'SpeedyFreight_MasterAgreement.pdf', mimetype: 'application/pdf', size: 512000, path: `uploads/carrier_agreement_speedy.pdf`, tags: ['Agreement', 'Contract'], relatedTo: { type: 'carrier', id: carriers[0]?._id }, uploadedBy: adminUser._id },
     ];
-    // Create dummy files in uploads folder if they don't exist for seed to work without actual uploads
-    const dummyUploadsPath = path_1.default.join(__dirname, '../../../uploads'); // Adjust if your structure is different
-    if (!fs.existsSync(dummyUploadsPath))
-        fs.mkdirSync(dummyUploadsPath, { recursive: true });
+    const dummyUploadsPath = path_1.default.join(__dirname, '../../../uploads');
+    if (!fs_1.default.existsSync(dummyUploadsPath))
+        fs_1.default.mkdirSync(dummyUploadsPath, { recursive: true });
     documentsData.forEach(doc => {
-        const filePath = path_1.default.join(dummyUploadsPath, doc.filename);
-        if (!fs.existsSync(filePath)) {
-            fs.writeFileSync(filePath, "This is a dummy file for seeding.");
+        if (doc.filename) {
+            const filePath = path_1.default.join(dummyUploadsPath, doc.filename);
+            if (!fs_1.default.existsSync(filePath)) {
+                fs_1.default.writeFileSync(filePath, "This is a dummy file for seeding.");
+            }
+            doc.path = `uploads/${doc.filename}`;
         }
-        // Update path in docData to be relative to project root or as stored in DB
-        doc.path = `uploads/${doc.filename}`; // Assuming 'uploads' is at project root level
     });
     try {
         const documents = await Document_1.Document.create(documentsData);

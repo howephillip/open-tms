@@ -6,11 +6,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ShipperController = void 0;
 const mongoose_1 = __importDefault(require("mongoose"));
 const Shipper_1 = require("../models/Shipper");
+const Shipment_1 = require("../models/Shipment"); // Corrected import
 const logger_1 = require("../utils/logger");
-// Helper to parse sort query
 const parseSortQuery = (sortQueryString) => {
     if (!sortQueryString)
-        return { name: 1 }; // Default sort for shippers by name
+        return { name: 1 };
     const sortOptions = {};
     sortQueryString.split(',').forEach(part => {
         const trimmedPart = part.trim();
@@ -42,7 +42,7 @@ class ShipperController {
                 return;
             }
             let query = {};
-            const { name, industry, searchTerm } = req.query; // Added searchTerm
+            const { name, industry, searchTerm } = req.query;
             const specificFilters = {};
             if (name)
                 specificFilters.name = { $regex: name, $options: 'i' };
@@ -52,24 +52,12 @@ class ShipperController {
                 const searchStr = searchTerm.trim();
                 const searchRegex = { $regex: searchStr, $options: 'i' };
                 const searchOrConditions = [
-                    { name: searchRegex },
-                    { industry: searchRegex },
-                    { 'contact.name': searchRegex },
-                    { 'contact.email': searchRegex },
-                    { 'contact.phone': searchRegex }, // Consider stripping non-digits for phone search
-                    { 'address.street': searchRegex },
-                    { 'address.city': searchRegex },
-                    { 'address.state': searchRegex },
-                    { 'address.zip': searchRegex },
+                    { name: searchRegex }, { industry: searchRegex },
+                    { 'contact.name': searchRegex }, { 'contact.email': searchRegex }, { 'contact.phone': searchRegex },
+                    { 'address.street': searchRegex }, { 'address.city': searchRegex }, { 'address.state': searchRegex }, { 'address.zip': searchRegex },
                     { 'billingInfo.invoiceEmail': searchRegex },
-                    // Add other text fields from IShipper you want to search
                 ];
-                if (Object.keys(specificFilters).length > 0) {
-                    query = { $and: [specificFilters, { $or: searchOrConditions }] };
-                }
-                else {
-                    query = { $or: searchOrConditions };
-                }
+                query = Object.keys(specificFilters).length > 0 ? { $and: [specificFilters, { $or: searchOrConditions }] } : { $or: searchOrConditions };
                 logger_1.logger.info('Added global search conditions for shippers with searchTerm:', searchStr);
             }
             else {
@@ -80,60 +68,88 @@ class ShipperController {
                 .sort(sortOptions)
                 .limit(limit)
                 .skip((page - 1) * limit)
-                .lean(); // .populate('documents') // Optional: if you want to show document count/list
+                .lean();
             const total = await Shipper_1.Shipper.countDocuments(query);
             logger_1.logger.info(`Found ${shippers.length} shippers, total matching query: ${total}.`);
             res.status(200).json({
                 success: true,
                 message: "Shippers fetched successfully",
-                data: {
-                    shippers, // Ensure frontend expects 'shippers'
-                    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-                },
+                data: { shippers, pagination: { page, limit, total, pages: Math.ceil(total / limit) }, },
             });
         }
         catch (error) {
-            logger_1.logger.error('CRITICAL ERROR in getShippers:', {
-                message: error.message, name: error.name, stack: error.stack,
-                query: req.query, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-            });
+            logger_1.logger.error('CRITICAL ERROR in getShippers:', { message: error.message, name: error.name, stack: error.stack, query: req.query, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2) });
             res.status(500).json({ success: false, message: 'Error fetching shippers', errorDetails: error.message });
         }
     }
     async createShipper(req, res) {
         logger_1.logger.info('Attempting to create shipper with body:', req.body);
         try {
-            const { name, address, contact, billingInfo, industry } = req.body;
-            // Enhanced validation
-            if (!name || !industry ||
-                !contact || !contact.name || !contact.email ||
-                !address || !address.street || !address.city || !address.state || !address.zip ||
-                !billingInfo || !billingInfo.invoiceEmail) {
-                res.status(400).json({ success: false, message: 'Missing required fields. Ensure name, industry, full contact, full address, and invoice email are provided.' });
+            const { name, address, contact, billingInfo, industry, preferredEquipment } = req.body;
+            const missing = [];
+            if (!name)
+                missing.push("name");
+            if (!industry)
+                missing.push("industry");
+            if (!contact)
+                missing.push("contact object");
+            else {
+                if (!contact.name)
+                    missing.push("contact name");
+                if (!contact.email)
+                    missing.push("contact email");
+                if (!contact.phone)
+                    missing.push("contact phone");
+            }
+            if (!address)
+                missing.push("address object");
+            else {
+                if (!address.street)
+                    missing.push("address street");
+                if (!address.city)
+                    missing.push("address city");
+                if (!address.state)
+                    missing.push("address state");
+                if (!address.zip)
+                    missing.push("address zip");
+            }
+            if (!billingInfo)
+                missing.push("billingInfo object");
+            else {
+                if (!billingInfo.invoiceEmail)
+                    missing.push("billing invoice email");
+                if (!billingInfo.paymentTerms)
+                    missing.push("billing payment terms");
+            }
+            if (missing.length > 0) {
+                const missingFieldsMsg = `Missing required fields. Ensure ${missing.join(', ')} are provided.`;
+                logger_1.logger.warn(`Shipper Create Validation: ${missingFieldsMsg}`, { body: req.body });
+                res.status(400).json({ success: false, message: missingFieldsMsg });
                 return;
             }
-            const newShipperData = { ...req.body };
-            // Convert preferredEquipment string to array if necessary
-            if (newShipperData.preferredEquipment && typeof newShipperData.preferredEquipment === 'string') {
-                newShipperData.preferredEquipment = newShipperData.preferredEquipment.split(',').map((e) => e.trim()).filter((e) => e);
+            const newShipperData = {
+                name, industry, contact, address, billingInfo,
+                preferredEquipment: Array.isArray(preferredEquipment) ? preferredEquipment : (preferredEquipment ? String(preferredEquipment).split(',').map(e => e.trim()).filter(e => e) : [])
+            };
+            if (billingInfo && billingInfo.creditLimit !== undefined) {
+                newShipperData.billingInfo.creditLimit = parseFloat(billingInfo.creditLimit) || 0;
             }
             const newShipper = new Shipper_1.Shipper(newShipperData);
             await newShipper.save();
             logger_1.logger.info('Shipper created successfully', { shipperId: newShipper._id });
-            res.status(201).json({
-                success: true,
-                message: 'Shipper created successfully',
-                data: newShipper,
-            });
+            res.status(201).json({ success: true, message: 'Shipper created successfully', data: newShipper });
         }
         catch (error) {
-            logger_1.logger.error('CRITICAL ERROR in createShipper:', { /* ... detailed log ... */});
+            logger_1.logger.error('CRITICAL ERROR in createShipper:', { message: error.message, name: error.name, requestBody: req.body });
             if (error.name === 'ValidationError')
                 res.status(400).json({ success: false, message: 'Validation Error creating shipper', errors: error.errors });
-            else if (error.code === 11000)
+            else if (error.code === 11000) {
                 res.status(409).json({ success: false, message: 'A shipper with similar unique fields (e.g., name) might already exist.', errorDetails: error.keyValue });
-            else
+                // No return here, fall through to general error if not caught
+            }
+            else {
                 res.status(500).json({ success: false, message: 'Error creating shipper', errorDetails: error.message });
+            }
         }
     }
     async getShipperById(req, res) {
@@ -144,9 +160,7 @@ class ShipperController {
                 res.status(400).json({ success: false, message: 'Invalid shipper ID format.' });
                 return;
             }
-            const shipper = await Shipper_1.Shipper.findById(id)
-                // .populate('documents') // If you want to show associated documents
-                .lean();
+            const shipper = await Shipper_1.Shipper.findById(id).lean();
             if (!shipper) {
                 res.status(404).json({ success: false, message: 'Shipper not found.' });
                 return;
@@ -167,32 +181,13 @@ class ShipperController {
         }
         try {
             const updateData = { ...req.body };
-            // Transform preferredEquipment string to array if necessary
             if (updateData.preferredEquipment && typeof updateData.preferredEquipment === 'string') {
                 updateData.preferredEquipment = updateData.preferredEquipment.split(',').map((e) => e.trim()).filter((e) => e);
             }
-            // Ensure nested objects are set correctly, e.g., for $set to work on sub-fields
-            // If frontend sends flat structure like contactName, addressStreet:
-            const payloadForUpdate = {};
-            for (const key in updateData) {
-                if (key.startsWith('contact') || key.startsWith('address') || key.startsWith('billingInfo')) {
-                    const [parent, child] = key.split(/(?=[A-Z])/); // Splits 'contactName' into 'contact', 'Name'
-                    if (parent && child) {
-                        if (!payloadForUpdate[parent])
-                            payloadForUpdate[parent] = {};
-                        payloadForUpdate[parent][child.toLowerCase()] = updateData[key];
-                    }
-                }
-                else {
-                    payloadForUpdate[key] = updateData[key];
-                }
+            if (updateData.billingInfo && updateData.billingInfo.creditLimit !== undefined) {
+                updateData.billingInfo.creditLimit = parseFloat(updateData.billingInfo.creditLimit) || 0;
             }
-            // For fields like billingInfo.creditLimit which might be string from form
-            if (payloadForUpdate.billingInfo && payloadForUpdate.billingInfo.creditlimit) {
-                payloadForUpdate.billingInfo.creditLimit = parseFloat(payloadForUpdate.billingInfo.creditlimit);
-                delete payloadForUpdate.billingInfo.creditlimit; // remove lowercase version
-            }
-            const updatedShipper = await Shipper_1.Shipper.findByIdAndUpdate(id, { $set: payloadForUpdate }, { new: true, runValidators: true }).lean();
+            const updatedShipper = await Shipper_1.Shipper.findByIdAndUpdate(id, { $set: updateData }, { new: true, runValidators: true }).lean();
             if (!updatedShipper) {
                 res.status(404).json({ success: false, message: 'Shipper not found.' });
                 return;
@@ -201,13 +196,46 @@ class ShipperController {
             res.status(200).json({ success: true, message: 'Shipper updated successfully.', data: updatedShipper });
         }
         catch (error) {
-            logger_1.logger.error('CRITICAL ERROR in updateShipper:', { message: error.message, name: error.name, stack: error.stack, shipperId: id, requestBody: req.body });
+            logger_1.logger.error('CRITICAL ERROR in updateShipper:', { message: error.message, name: error.name, shipperId: id, requestBody: req.body });
             if (error.name === 'ValidationError')
                 res.status(400).json({ success: false, message: 'Validation Error', errors: error.errors });
             else if (error.code === 11000)
                 res.status(409).json({ success: false, message: 'Duplicate name or other unique field.', errorDetails: error.keyValue });
             else
                 res.status(500).json({ success: false, message: 'Error updating shipper.', errorDetails: error.message });
+        }
+    }
+    async deleteShipper(req, res) {
+        const { id } = req.params;
+        logger_1.logger.info(`Attempting to delete shipper with ID: ${id}`);
+        if (!mongoose_1.default.Types.ObjectId.isValid(id)) {
+            res.status(400).json({ success: false, message: 'Invalid shipper ID format.' });
+            return;
+        }
+        try {
+            const activeShipmentsCount = await Shipment_1.Shipment.countDocuments({
+                shipper: new mongoose_1.default.Types.ObjectId(id),
+                status: { $nin: ['quote', 'cancelled', 'delivered', 'paid'] }
+            });
+            if (activeShipmentsCount > 0) {
+                logger_1.logger.warn(`Attempt to delete shipper ID: ${id} with ${activeShipmentsCount} active shipments.`);
+                res.status(409).json({
+                    success: false,
+                    message: `Cannot delete shipper. It is associated with ${activeShipmentsCount} active shipment(s). Please reassign or cancel these shipments first.`
+                });
+                return; // Added return
+            }
+            const shipper = await Shipper_1.Shipper.findByIdAndDelete(id);
+            if (!shipper) {
+                res.status(404).json({ success: false, message: 'Shipper not found.' });
+                return;
+            }
+            logger_1.logger.info(`Shipper with ID: ${id} deleted successfully.`);
+            res.status(200).json({ success: true, message: 'Shipper deleted successfully.' });
+        }
+        catch (error) {
+            logger_1.logger.error('Error deleting shipper:', { message: error.message, stack: error.stack, id });
+            res.status(500).json({ success: false, message: 'Error deleting shipper.', errorDetails: error.message });
         }
     }
 }

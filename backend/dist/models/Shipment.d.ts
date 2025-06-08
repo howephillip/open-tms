@@ -1,10 +1,11 @@
 import mongoose, { Document } from 'mongoose';
+export type ModeOfTransportType = 'truckload-ftl' | 'truckload-ltl' | 'drayage-import' | 'drayage-export' | 'intermodal-rail' | 'ocean-fcl' | 'ocean-lcl' | 'air-freight' | 'expedited-ground' | 'final-mile' | 'other';
+export type ShipmentStatusType = 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up' | 'in_transit_origin_drayage' | 'at_origin_port_ramp' | 'in_transit_main_leg' | 'at_destination_port_ramp' | 'in_transit_destination_drayage' | 'at_delivery' | 'delivered' | 'pod_received' | 'invoiced' | 'paid' | 'cancelled' | 'on_hold' | 'problem';
 export interface IReferenceNumber {
     type: string;
     value: string;
     _id?: mongoose.Types.ObjectId;
 }
-type ShipmentStatusType = 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up' | 'in_transit_origin_drayage' | 'at_origin_port_ramp' | 'in_transit_main_leg' | 'at_destination_port_ramp' | 'in_transit_destination_drayage' | 'at_delivery' | 'delivered' | 'pod_received' | 'invoiced' | 'paid' | 'cancelled' | 'on_hold' | 'problem';
 export interface IQuoteAccessorial {
     accessorialTypeId: mongoose.Types.ObjectId;
     name?: string;
@@ -29,12 +30,14 @@ export interface IShipment extends Document {
     fscType?: 'fixed' | 'percentage' | '';
     fscCustomerAmount?: number;
     fscCarrierAmount?: number;
+    chassisCustomerCost?: number;
+    chassisCarrierCost?: number;
     accessorials?: IQuoteAccessorial[];
     quoteNotes?: string;
     quoteValidUntil?: Date;
     quotedBy?: mongoose.Types.ObjectId;
     shipper: mongoose.Types.ObjectId;
-    carrier: mongoose.Types.ObjectId;
+    carrier?: mongoose.Types.ObjectId;
     consignee?: {
         name?: string;
         address?: string;
@@ -43,7 +46,7 @@ export interface IShipment extends Document {
         contactEmail?: string;
     };
     billTo?: mongoose.Types.ObjectId;
-    modeOfTransport: 'truckload-ftl' | 'truckload-ltl' | 'drayage-import' | 'drayage-export' | 'intermodal-rail' | 'ocean-fcl' | 'ocean-lcl' | 'air-freight' | 'expedited-ground' | 'final-mile' | 'other';
+    modeOfTransport: ModeOfTransportType;
     steamshipLine?: string;
     vesselName?: string;
     voyageNumber?: string;
@@ -76,10 +79,10 @@ export interface IShipment extends Document {
     transloadDate?: Date;
     origin: {
         name?: string;
-        address: string;
-        city: string;
-        state: string;
-        zip: string;
+        address?: string;
+        city?: string;
+        state?: string;
+        zip?: string;
         country?: string;
         locationType?: string;
         contactName?: string;
@@ -89,10 +92,10 @@ export interface IShipment extends Document {
     };
     destination: {
         name?: string;
-        address: string;
-        city: string;
-        state: string;
-        zip: string;
+        address?: string;
+        city?: string;
+        state?: string;
+        zip?: string;
         country?: string;
         locationType?: string;
         contactName?: string;
@@ -100,19 +103,19 @@ export interface IShipment extends Document {
         contactEmail?: string;
         notes?: string;
     };
-    scheduledPickupDate: Date;
+    scheduledPickupDate?: Date;
+    scheduledDeliveryDate?: Date;
     scheduledPickupTime?: string;
     pickupAppointmentNumber?: string;
     actualPickupDateTime?: Date;
-    scheduledDeliveryDate: Date;
     scheduledDeliveryTime?: string;
     deliveryAppointmentNumber?: string;
     actualDeliveryDateTime?: Date;
     status: ShipmentStatusType;
-    equipmentType: string;
+    equipmentType?: string;
     equipmentLength?: number;
     equipmentUnit?: 'ft' | 'm';
-    commodityDescription: string;
+    commodityDescription?: string;
     pieceCount?: number;
     packageType?: string;
     totalWeight?: number;
@@ -148,9 +151,10 @@ export interface IShipment extends Document {
     documents?: mongoose.Types.ObjectId[];
     createdBy: mongoose.Types.ObjectId;
     updatedBy?: mongoose.Types.ObjectId;
+    createdAt?: Date;
+    updatedAt?: Date;
 }
 export declare const Shipment: mongoose.Model<IShipment, {}, {}, {}, mongoose.Document<unknown, {}, IShipment> & IShipment & {
     _id: mongoose.Types.ObjectId;
 }, any>;
-export {};
 //# sourceMappingURL=Shipment.d.ts.map

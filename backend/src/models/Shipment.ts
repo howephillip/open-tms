@@ -1,12 +1,27 @@
 // File: backend/src/models/Shipment.ts
 import mongoose, { Schema, Document } from 'mongoose';
-import { customAlphabet } from 'nanoid';
+import { nanoid as generateNanoid, customAlphabet } from 'nanoid'; // Correct import for nanoid v3
 import { logger } from '../utils/logger';
-import { ApplicationSettings, IQuoteFormSettings } from './ApplicationSettings';
+import { ApplicationSettings, IQuoteFormSettings } from './ApplicationSettings'; // Ensure this exists and exports correctly
 
 const nanoidTms = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 8);
 
-export interface IReferenceNumber {
+// Define ModeOfTransportType locally for the model
+export type ModeOfTransportType = // EXPORTED
+    | 'truckload-ftl' | 'truckload-ltl'
+    | 'drayage-import' | 'drayage-export'
+    | 'intermodal-rail'
+    | 'ocean-fcl' | 'ocean-lcl'
+    | 'air-freight'
+    | 'expedited-ground' | 'final-mile' | 'other';
+
+export type ShipmentStatusType = // EXPORTED
+    | 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up'
+    | 'in_transit_origin_drayage' | 'at_origin_port_ramp' | 'in_transit_main_leg'
+    | 'at_destination_port_ramp' | 'in_transit_destination_drayage' | 'at_delivery'
+    | 'delivered' | 'pod_received' | 'invoiced' | 'paid' | 'cancelled' | 'on_hold' | 'problem';
+
+export interface IReferenceNumber { // EXPORTED
   type: string;
   value: string;
   _id?: mongoose.Types.ObjectId;
@@ -16,13 +31,7 @@ const referenceNumberSchema = new Schema<IReferenceNumber>({
   value: { type: String, required: true, trim: true }
 }, { _id: true });
 
-type ShipmentStatusType =
-    | 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up'
-    | 'in_transit_origin_drayage' | 'at_origin_port_ramp' | 'in_transit_main_leg'
-    | 'at_destination_port_ramp' | 'in_transit_destination_drayage' | 'at_delivery'
-    | 'delivered' | 'pod_received' | 'invoiced' | 'paid' | 'cancelled' | 'on_hold' | 'problem';
-
-export interface IQuoteAccessorial {
+export interface IQuoteAccessorial { // EXPORTED
   accessorialTypeId: mongoose.Types.ObjectId;
   name?: string;
   quantity?: number;
@@ -40,7 +49,7 @@ const quoteAccessorialSchema = new Schema<IQuoteAccessorial>({
   notes: { type: String, trim: true },
 }, { _id: true });
 
-export interface IShipment extends Document {
+export interface IShipment extends Document { // EXPORTED
   shipmentNumber: string;
   billOfLadingNumber?: string;
   proNumber?: string;
@@ -61,11 +70,11 @@ export interface IShipment extends Document {
   quoteNotes?: string;
   quoteValidUntil?: Date;
   quotedBy?: mongoose.Types.ObjectId;
-  shipper: mongoose.Types.ObjectId; // Still fundamentally required
-  carrier?: mongoose.Types.ObjectId; // Optional for quotes
+  shipper: mongoose.Types.ObjectId;
+  carrier?: mongoose.Types.ObjectId;
   consignee?: { name?: string; address?: string; contactName?: string; contactPhone?: string; contactEmail?: string; };
   billTo?: mongoose.Types.ObjectId;
-  modeOfTransport: ModeOfTransportType; // Fundamentally required
+  modeOfTransport: ModeOfTransportType;
   steamshipLine?: string;
   vesselName?: string;
   voyageNumber?: string;
@@ -90,21 +99,21 @@ export interface IShipment extends Document {
   isTransload?: boolean;
   transloadFacility?: { name?: string; address?: string; city?: string; state?: string; zip?: string; };
   transloadDate?: Date;
-  origin: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; }; // Sub-fields become optional here
-  destination: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; }; // Sub-fields become optional here
-  scheduledPickupDate?: Date; // Made optional at schema level
-  scheduledDeliveryDate?: Date; // Made optional at schema level
+  origin: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
+  destination: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
+  scheduledPickupDate?: Date;
+  scheduledDeliveryDate?: Date;
   scheduledPickupTime?: string;
   pickupAppointmentNumber?: string;
   actualPickupDateTime?: Date;
   scheduledDeliveryTime?: string;
   deliveryAppointmentNumber?: string;
   actualDeliveryDateTime?: Date;
-  status: ShipmentStatusType; // Fundamentally required
-  equipmentType?: string; // Made optional at schema level
+  status: ShipmentStatusType;
+  equipmentType?: string;
   equipmentLength?: number;
   equipmentUnit?: 'ft' | 'm';
-  commodityDescription?: string; // Made optional at schema level
+  commodityDescription?: string;
   pieceCount?: number;
   packageType?: string;
   totalWeight?: number;
@@ -116,8 +125,8 @@ export interface IShipment extends Document {
   temperatureMin?: number;
   temperatureMax?: number;
   tempUnit?: 'C' | 'F';
-  customerRate: number; // Required for financial calcs
-  carrierCostTotal: number; // Required for financial calcs
+  customerRate: number;
+  carrierCostTotal: number;
   grossProfit?: number;
   margin?: number;
   totalCustomerRate?: number;
@@ -131,16 +140,18 @@ export interface IShipment extends Document {
     _id?: mongoose.Types.ObjectId;
   }];
   documents?: mongoose.Types.ObjectId[];
-  createdBy: mongoose.Types.ObjectId; // Fundamentally required
+  createdBy: mongoose.Types.ObjectId;
   updatedBy?: mongoose.Types.ObjectId;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const locationSchema = new Schema({
     name: { type: String, trim: true },
-    address: { type: String, /* required: false, */ trim: true }, // Optional at schema level
-    city: { type: String, /* required: false, */ trim: true },    // Optional at schema level
-    state: { type: String, /* required: false, */ trim: true },   // Optional at schema level
-    zip: { type: String, /* required: false, */ trim: true },     // Optional at schema level
+    address: { type: String, trim: true },
+    city: { type: String, trim: true },
+    state: { type: String, trim: true },
+    zip: { type: String, trim: true },
     country: { type: String, trim: true, default: 'USA' },
     locationType: { type: String, enum: ['shipper_facility', 'port_terminal', 'rail_ramp', 'airport_cargo', 'warehouse', 'consignee_facility', 'other'], trim: true },
     contactName: { type: String, trim: true },
@@ -148,6 +159,12 @@ const locationSchema = new Schema({
     contactEmail: { type: String, trim: true, lowercase: true },
     notes: { type: String, trim: true },
 }, { _id: false });
+
+const modeOfTransportEnumValues: ModeOfTransportType[] = [
+    'truckload-ftl', 'truckload-ltl', 'drayage-import', 'drayage-export',
+    'intermodal-rail', 'ocean-fcl', 'ocean-lcl', 'air-freight',
+    'expedited-ground', 'final-mile', 'other'
+];
 
 const statusEnumValues: ShipmentStatusType[] = [
     'quote', 'booked', 'dispatched', 'at_pickup', 'picked_up',
@@ -178,10 +195,10 @@ const shipmentSchema = new Schema<IShipment>({
   quoteValidUntil: { type: Date },
   quotedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   shipper: { type: Schema.Types.ObjectId, ref: 'Shipper', required: true, index: true },
-  carrier: { type: Schema.Types.ObjectId, ref: 'Carrier', required: false, index: true }, // Keep as false to allow null/undefined for quotes
+  carrier: { type: Schema.Types.ObjectId, ref: 'Carrier', required: false, index: true },
   consignee: { name: String, address: String, contactName: String, contactPhone: String, contactEmail: String },
   billTo: { type: Schema.Types.ObjectId, ref: 'Customer' },
-  modeOfTransport: { type: String, enum: ['truckload-ftl', 'truckload-ltl', 'drayage-import', 'drayage-export', 'intermodal-rail', 'ocean-fcl', 'ocean-lcl', 'air-freight', 'expedited-ground', 'final-mile', 'other'], required: true, index: true },
+  modeOfTransport: { type: String, enum: modeOfTransportEnumValues, required: true, index: true },
   steamshipLine: { type: String, trim: true },
   vesselName: { type: String, trim: true },
   voyageNumber: { type: String, trim: true },
@@ -206,10 +223,10 @@ const shipmentSchema = new Schema<IShipment>({
   isTransload: { type: Boolean, default: false },
   transloadFacility: { name: String, address: String, city: String, state: String, zip: String },
   transloadDate: Date,
-  origin: { type: locationSchema, required: true }, // Origin/Dest objects themselves are required
-  destination: { type: locationSchema, required: true }, // Their subfields now controlled by controller
-  scheduledPickupDate: { type: Date, /* required: false, */ index: true }, // Example: Now optional at schema level
-  scheduledDeliveryDate: { type: Date, /* required: false, */ index: true }, // Example: Now optional at schema level
+  origin: { type: locationSchema, required: true },
+  destination: { type: locationSchema, required: true },
+  scheduledPickupDate: { type: Date, index: true },
+  scheduledDeliveryDate: { type: Date, index: true },
   scheduledPickupTime: { type: String, trim: true },
   pickupAppointmentNumber: { type: String, trim: true },
   actualPickupDateTime: { type: Date },
@@ -217,10 +234,10 @@ const shipmentSchema = new Schema<IShipment>({
   deliveryAppointmentNumber: { type: String, trim: true },
   actualDeliveryDateTime: { type: Date },
   status: { type: String, enum: statusEnumValues, default: 'booked', required: true, index: true },
-  equipmentType: { type: String, /* required: false, */ trim: true }, // Optional at schema
+  equipmentType: { type: String, trim: true },
   equipmentLength: { type: Number },
   equipmentUnit: { type: String, enum: ['ft', 'm'] },
-  commodityDescription: { type: String, /* required: false, */ trim: true }, // Optional at schema
+  commodityDescription: { type: String, trim: true },
   pieceCount: { type: Number },
   packageType: { type: String, trim: true },
   totalWeight: { type: Number },
@@ -257,8 +274,15 @@ const shipmentSchema = new Schema<IShipment>({
   timestamps: true
 });
 
-// Pre-save hook (financial calculations and shipment number generation)
-// This remains largely the same, but it now respects that some base values might be optional.
+// Define defaultControllerQuoteFormSettings here as well if model pre-save hook needs it
+// For now, the shipment number generation logic is simplified to not depend on it directly.
+const modelDefaultQuoteFormSettings: IQuoteFormSettings = {
+    requiredFields: [], // Not used by model directly for validation, controller handles it.
+    quoteNumberPrefix: 'QT-',
+    quoteNumberNextSequence: 1000, // Placeholder
+};
+
+
 shipmentSchema.pre<IShipment>('save', async function(next) {
   let lineHaulCustomer = this.customerRate || 0;
   let lineHaulCarrier = this.carrierCostTotal || 0;
@@ -311,38 +335,31 @@ shipmentSchema.pre<IShipment>('save', async function(next) {
     let attempts = 0;
     let unique = false;
     let generatedNumber = '';
-    const ShipmentModel = mongoose.model<IShipment>('Shipment');
-    const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
-    const prefixFromSettings = (settingsDoc?.settings as IQuoteFormSettings)?.quoteNumberPrefix || defaultControllerQuoteFormSettings.quoteNumberPrefix;
+    const ShipmentModelInstance = mongoose.model<IShipment>('Shipment'); // Use different name from export
+    
+    let prefixToUse = this.modeOfTransport ? this.modeOfTransport.substring(0,2).toUpperCase().replace('-', '') : "GN";
 
-
-    while(!unique && attempts < 5) {
-        // Use prefix from settings if status is 'quote', otherwise use mode-based prefix
-        const prefix = this.status === 'quote' 
-            ? prefixFromSettings 
-            : (this.modeOfTransport ? this.modeOfTransport.substring(0,2).toUpperCase().replace('-', '') : "GN");
-        
-        generatedNumber = `${prefix}${nanoidTms()}`; // Using nanoid for the random part
-
-        // If using sequence from settings (more complex, requires updating the setting document atomically)
-        // For now, simple prefix + nanoid is safer without transactional updates to settings sequence.
-        // If you want to use and increment quoteNumberNextSequence from settings, that needs careful handling.
-        // Example if you wanted to try (NEEDS ATOMIC UPDATE on ApplicationSettings):
-        // if (this.status === 'quote' && settingsDoc && (settingsDoc.settings as IQuoteFormSettings).quoteNumberNextSequence) {
-        //    generatedNumber = `${prefixFromSettings}${(settingsDoc.settings as IQuoteFormSettings).quoteNumberNextSequence}`;
-        // } else {
-        //    generatedNumber = `${prefix}-${nanoidTms()}`;
-        // }
-
-
+    if (this.status === 'quote') {
         try {
-            const existing = await ShipmentModel.findOne({ shipmentNumber: generatedNumber }).select('_id').lean();
+            const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
+            if (settingsDoc && settingsDoc.settings) {
+                prefixToUse = (settingsDoc.settings as IQuoteFormSettings).quoteNumberPrefix || modelDefaultQuoteFormSettings.quoteNumberPrefix || prefixToUse;
+            } else {
+                prefixToUse = modelDefaultQuoteFormSettings.quoteNumberPrefix || prefixToUse;
+            }
+        } catch (settingsError) {
+            logger.error("Could not fetch quote settings for shipment number prefix, using mode-based/default.", settingsError);
+            prefixToUse = modelDefaultQuoteFormSettings.quoteNumberPrefix || prefixToUse;
+        }
+    }
+    
+    while(!unique && attempts < 5) {
+        generatedNumber = `${prefixToUse}${nanoidTms()}`;
+        try {
+            const existing = await ShipmentModelInstance.findOne({ shipmentNumber: generatedNumber }).select('_id').lean();
             if (!existing) {
                 unique = true;
-            } 
-            // else if (this.status === 'quote' && settingsDoc && (settingsDoc.settings as IQuoteFormSettings).quoteNumberNextSequence) {
-            //   (settingsDoc.settings as IQuoteFormSettings).quoteNumberNextSequence++; // This is NOT atomic and BAD for concurrency
-            // }
+            }
         } catch (err) {
             logger.error("Error checking for existing shipment number during generation:", err);
             attempts = 5;
@@ -351,16 +368,14 @@ shipmentSchema.pre<IShipment>('save', async function(next) {
     }
     if (unique) {
         this.shipmentNumber = generatedNumber;
-        // If using sequence, here you would attempt to atomically increment ApplicationSettings.quoteNumberNextSequence
     } else {
-        this.shipmentNumber = `TMS-ERR-${Date.now()}-${Math.random().toString(36).substring(2,7)}`;
-        logger.error(`Failed to generate a unique shipment number after ${attempts} attempts. Using fallback: ${this.shipmentNumber}`);
+        this.shipmentNumber = `TMS-ERR-${Date.now()}-${generateNanoid(5)}`;
+        logger.error(`Failed to generate a unique shipment number. Using fallback: ${this.shipmentNumber}`);
     }
   }
   next();
 });
 
-// Indexes (keep as is)
 shipmentSchema.index({ shipmentNumber: 1 }, { unique: true });
 shipmentSchema.index({ status: 1, scheduledPickupDate: -1 });
 shipmentSchema.index({ 'origin.city': 1, 'destination.city': 1 });
@@ -373,4 +388,5 @@ shipmentSchema.index({ modeOfTransport: 1, status: 1 });
 shipmentSchema.index({ purchaseOrderNumbers: 1 }, {sparse: true});
 shipmentSchema.index({ createdBy: 1, createdAt: -1 });
 
+// Export the model as a named export
 export const Shipment = mongoose.model<IShipment>('Shipment', shipmentSchema);

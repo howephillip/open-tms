@@ -34,27 +34,38 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.Carrier = void 0;
+// File: backend/src/models/Carrier.ts
 const mongoose_1 = __importStar(require("mongoose"));
 const carrierSchema = new mongoose_1.Schema({
-    name: { type: String, required: true },
-    mcNumber: { type: String, required: true, unique: true },
-    dotNumber: { type: String, required: true, unique: true },
+    name: { type: String, required: true, trim: true },
+    mcNumber: { type: String, required: true, unique: true, trim: true, index: true },
+    dotNumber: { type: String, required: true, unique: true, trim: true, index: true },
     address: {
-        street: { type: String, required: true },
-        city: { type: String, required: true },
-        state: { type: String, required: true },
-        zip: { type: String, required: true }
+        street: { type: String, required: true, trim: true },
+        city: { type: String, required: true, trim: true },
+        state: { type: String, required: true, trim: true },
+        zip: { type: String, required: true, trim: true },
+        country: { type: String, trim: true, default: 'USA' }
     },
     contact: {
-        name: { type: String, required: true },
-        phone: { type: String, required: true },
-        email: { type: String, required: true }
+        name: { type: String, required: true, trim: true },
+        phone: { type: String, required: true, trim: true },
+        email: { type: String, required: true, trim: true, lowercase: true },
+        fax: { type: String, trim: true }
     },
     saferData: {
         lastUpdated: Date,
         saferRating: String,
         status: String,
-        insuranceInfo: mongoose_1.Schema.Types.Mixed
+        insuranceInfo: mongoose_1.Schema.Types.Mixed,
+        totalDrivers: Number,
+        totalPowerUnits: Number,
+        carrierOperation: String,
+        hmFlag: String,
+        pcFlag: String,
+        censusType: String,
+        outOfServiceDate: String,
+        mcs150Date: String,
     },
     equipment: [String],
     preferredLanes: [String],
@@ -67,7 +78,8 @@ const carrierSchema = new mongoose_1.Schema({
         totalShipments: { type: Number, default: 0 },
         averageRating: { type: Number, default: 0 }
     },
-    documents: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Document' }]
+    documents: [{ type: mongoose_1.Schema.Types.ObjectId, ref: 'Document' }],
+    isActive: { type: Boolean, default: true, index: true }
 }, {
     timestamps: true
 });

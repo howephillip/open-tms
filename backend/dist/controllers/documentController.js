@@ -8,12 +8,10 @@ const mongoose_1 = __importDefault(require("mongoose"));
 const multer_1 = __importDefault(require("multer"));
 const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
-const Document_1 = require("../models/Document"); // Renamed to avoid conflict
-const User_1 = require("../models/User"); // Assuming uploadedBy refers to User
+const Document_1 = require("../models/Document");
+const User_1 = require("../models/User");
 const logger_1 = require("../utils/logger");
-// --- Multer Configuration ---
-// Ensure the uploads directory exists
-const UPLOADS_DIR = path_1.default.join(__dirname, '../../../uploads'); // Store uploads in project_root/uploads
+const UPLOADS_DIR = path_1.default.join(__dirname, '../../../uploads');
 if (!fs_1.default.existsSync(UPLOADS_DIR)) {
     fs_1.default.mkdirSync(UPLOADS_DIR, { recursive: true });
     logger_1.logger.info(`Uploads directory created at: ${UPLOADS_DIR}`);
@@ -22,41 +20,20 @@ else {
     logger_1.logger.info(`Uploads directory already exists at: ${UPLOADS_DIR}`);
 }
 const storage = multer_1.default.diskStorage({
-    destination: function (req, file, cb) {
-        // You can create subdirectories based on relatedToType or date if needed
-        // For now, all go into UPLOADS_DIR
-        cb(null, UPLOADS_DIR);
-    },
+    destination: function (req, file, cb) { cb(null, UPLOADS_DIR); },
     filename: function (req, file, cb) {
-        // Create a unique filename: timestamp-originalname
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + '-' + file.originalname.replace(/\s+/g, '_')); // Replace spaces
+        cb(null, uniqueSuffix + '-' + file.originalname.replace(/\s+/g, '_'));
     }
 });
-const fileFilter = (req, file, cb) => {
-    // Basic file type filter (customize as needed)
-    // const allowedMimes = ['image/jpeg', 'image/png', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip'];
-    // if (allowedMimes.includes(file.mimetype)) {
-    //   cb(null, true);
-    // } else {
-    //   cb(new Error('Invalid file type. Only specific image/document types are allowed.'));
-    // }
-    cb(null, true); // Allow all files for now
-};
 exports.upload = (0, multer_1.default)({
     storage: storage,
-    limits: { fileSize: 1024 * 1024 * 25 }, // 25MB limit per file
-    fileFilter: fileFilter
+    limits: { fileSize: 1024 * 1024 * 25 },
+    fileFilter: (req, file, cb) => { cb(null, true); }
 });
-// --- End Multer Configuration ---
 class DocumentController {
-    // --- UPLOAD one or more documents ---
-    // Use upload.array('files', 10) for multiple files (up to 10)
-    // Use upload.single('file') for a single file
     async uploadDocuments(req, res) {
         logger_1.logger.info('Attempting to upload documents. Body:', req.body, 'Files:', req.files);
-        // req.files will be an array of files if using upload.array()
-        // req.file will be a single file object if using upload.single()
         const files = req.files;
         if (!files || files.length === 0) {
             logger_1.logger.warn('No files were uploaded.');
@@ -64,8 +41,7 @@ class DocumentController {
             return;
         }
         const { relatedToType, relatedToId, tags } = req.body;
-        const uploadedByUserId = req.user?._id; // Assuming req.user is populated by auth middleware
-        // Basic validation for relatedTo fields
+        const uploadedByUserId = req.user?._id;
         if (relatedToType && relatedToType !== 'general' && !relatedToId) {
             logger_1.logger.warn('relatedToId is required when relatedToType is not general.');
             res.status(400).json({ success: false, message: `An ID for '${relatedToType}' must be provided.` });
@@ -76,37 +52,42 @@ class DocumentController {
             res.status(400).json({ success: false, message: `Invalid ID format for '${relatedToType}'.` });
             return;
         }
-        // Find a default user if not authenticated or uploadedBy not provided
         let finalUploadedBy = uploadedByUserId;
         if (!finalUploadedBy) {
-            // This is a fallback, ideally user should be authenticated
-            const defaultUser = await User_1.User.findOne({ role: 'admin' }).select('_id');
+            const defaultUser = await User_1.User.findOne({ role: 'admin' }).select('_id').lean();
             if (defaultUser) {
-                finalUploadedBy = defaultUser._id;
+                finalUploadedBy = defaultUser._id; // This is an ObjectId
                 logger_1.logger.info(`No authenticated user found, using default admin user: ${finalUploadedBy} for upload.`);
             }
             else {
                 logger_1.logger.error('CRITICAL: No user available to associate with uploaded documents and no default admin user found.');
-                // Clean up uploaded files if we can't save DB record
                 files.forEach(file => fs_1.default.unlink(file.path, err => { if (err)
                     logger_1.logger.error(`Failed to delete orphaned file ${file.path}`, err); }));
                 res.status(500).json({ success: false, message: 'Cannot process upload: No user context available.' });
                 return;
             }
         }
+        // Ensure finalUploadedBy is defined before proceeding
+        if (!finalUploadedBy) {
+            logger_1.logger.error('CRITICAL: finalUploadedBy became undefined unexpectedly before saving document metadata.');
+            files.forEach(file => fs_1.default.unlink(file.path, err => { if (err)
+                logger_1.logger.error(`Failed to delete orphaned file ${file.path}`, err); }));
+            res.status(500).json({ success: false, message: 'Internal error: User context for upload became undefined.' });
+            return;
+        }
         try {
             const documentsToSave = files.map(file => ({
-                filename: file.filename, // Name on disk
+                filename: file.filename,
                 originalName: file.originalname,
                 mimetype: file.mimetype,
                 size: file.size,
-                path: file.path, // Full path on disk where multer saved it
+                path: file.path,
                 tags: tags ? tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [],
                 relatedTo: relatedToType ? {
                     type: relatedToType,
                     id: relatedToId ? new mongoose_1.default.Types.ObjectId(relatedToId) : undefined
                 } : { type: 'general' },
-                uploadedBy: finalUploadedBy,
+                uploadedBy: new mongoose_1.default.Types.ObjectId(finalUploadedBy.toString()), // finalUploadedBy is now guaranteed to be defined
             }));
             const savedDocuments = await Document_1.Document.insertMany(documentsToSave);
             logger_1.logger.info(`${savedDocuments.length} documents uploaded and saved successfully.`);
@@ -117,29 +98,18 @@ class DocumentController {
             });
         }
         catch (error) {
-            logger_1.logger.error('CRITICAL ERROR in uploadDocuments (DB save):', {
-                message: error.message,
-                name: error.name,
-                stack: error.stack,
-                errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-            });
-            // If DB save fails, try to clean up uploaded files
-            files.forEach(file => {
-                fs_1.default.unlink(file.path, (err) => {
-                    if (err)
-                        logger_1.logger.error(`Failed to delete orphaned file ${file.path} after DB error:`, err);
-                });
-            });
+            logger_1.logger.error('CRITICAL ERROR in uploadDocuments (DB save):', { message: error.message, name: error.name, stack: error.stack, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2) });
+            files.forEach(file => { fs_1.default.unlink(file.path, (err) => { if (err)
+                logger_1.logger.error(`Failed to delete orphaned file ${file.path} after DB error:`, err); }); });
             res.status(500).json({ success: false, message: 'Error saving document metadata.', errorDetails: error.message });
         }
     }
-    // --- GET all documents (metadata) ---
     async getDocuments(req, res) {
         logger_1.logger.info('Attempting to get documents. Query params:', req.query);
         try {
             const pageQuery = req.query.page;
             const limitQuery = req.query.limit;
-            const { originalName, tags, relatedToType, relatedToId, sort = '-createdAt' } = req.query; // Default sort by newest
+            const { originalName, tags, relatedToType, relatedToId, sort = '-createdAt' } = req.query;
             const page = pageQuery ? parseInt(pageQuery, 10) : 1;
             const limit = limitQuery ? parseInt(limitQuery, 10) : 100;
             const query = {};
@@ -153,8 +123,7 @@ class DocumentController {
                 query['relatedTo.id'] = new mongoose_1.default.Types.ObjectId(relatedToId);
             }
             const documents = await Document_1.Document.find(query)
-                .populate('uploadedBy', 'firstName lastName email') // Populate user info
-                // Potentially populate relatedTo.id based on relatedTo.type if needed (more complex)
+                .populate('uploadedBy', 'firstName lastName email')
                 .sort(sort)
                 .limit(limit)
                 .skip((page - 1) * limit)
@@ -171,11 +140,10 @@ class DocumentController {
             });
         }
         catch (error) {
-            logger_1.logger.error('CRITICAL ERROR in getDocuments:', { /* ... */});
+            logger_1.logger.error('CRITICAL ERROR in getDocuments:', { message: error.message });
             res.status(500).json({ success: false, message: 'Error fetching documents', errorDetails: error.message });
         }
     }
-    // --- DOWNLOAD a document ---
     async downloadDocument(req, res) {
         logger_1.logger.info(`Attempting to download document with ID: ${req.params.id}`);
         try {
@@ -189,20 +157,17 @@ class DocumentController {
                 res.status(404).json({ success: false, message: 'Document not found or path missing.' });
                 return;
             }
-            // Check if file exists at doc.path
             if (!fs_1.default.existsSync(doc.path)) {
                 logger_1.logger.error(`File not found on disk for document ${id} at path: ${doc.path}`);
                 res.status(404).json({ success: false, message: 'File not found on server.' });
                 return;
             }
             logger_1.logger.info(`Streaming document: ${doc.originalName} from path: ${doc.path}`);
-            // Set headers to prompt download with original name
             res.setHeader('Content-Disposition', `attachment; filename="${doc.originalName}"`);
             res.setHeader('Content-Type', doc.mimetype);
             res.download(doc.path, doc.originalName, (err) => {
                 if (err) {
                     logger_1.logger.error(`Error during file download stream for doc ID ${id}:`, err);
-                    // Avoid sending another response if headers already sent
                     if (!res.headersSent) {
                         res.status(500).send({ success: false, message: 'Could not download file.' });
                     }
@@ -219,7 +184,6 @@ class DocumentController {
             }
         }
     }
-    // --- DELETE a document (metadata and file) ---
     async deleteDocument(req, res) {
         logger_1.logger.info(`Attempting to delete document with ID: ${req.params.id}`);
         try {
@@ -233,15 +197,13 @@ class DocumentController {
                 res.status(404).json({ success: false, message: 'Document not found.' });
                 return;
             }
-            const filePath = doc.path; // Path to the file on disk
-            await Document_1.Document.findByIdAndDelete(id); // Delete metadata from DB
+            const filePath = doc.path;
+            await Document_1.Document.findByIdAndDelete(id);
             logger_1.logger.info(`Document metadata deleted from DB for ID: ${id}`);
-            // Attempt to delete file from disk
             if (filePath && fs_1.default.existsSync(filePath)) {
                 fs_1.default.unlink(filePath, (err) => {
                     if (err) {
                         logger_1.logger.error(`Failed to delete file ${filePath} from disk for doc ID ${id}:`, err);
-                        // Don't fail the whole operation if file deletion fails, but log it
                     }
                     else {
                         logger_1.logger.info(`File ${filePath} deleted successfully from disk for doc ID: ${id}`);

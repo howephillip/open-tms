@@ -1,4 +1,20 @@
+// File: backend/src/models/Carrier.ts
 import mongoose, { Schema, Document } from 'mongoose';
+
+export interface ICarrierSaferData {
+  lastUpdated?: Date;
+  saferRating?: string;
+  status?: string;
+  insuranceInfo?: any;
+  totalDrivers?: number;
+  totalPowerUnits?: number;
+  carrierOperation?: string;
+  hmFlag?: string;
+  pcFlag?: string;
+  censusType?: string;
+  outOfServiceDate?: string;
+  mcs150Date?: string;
+}
 
 export interface ICarrier extends Document {
   name: string;
@@ -9,54 +25,62 @@ export interface ICarrier extends Document {
     city: string;
     state: string;
     zip: string;
+    country?: string;
   };
   contact: {
     name: string;
     phone: string;
     email: string;
+    fax?: string;
   };
-  saferData: {
-    lastUpdated: Date;
-    saferRating: string;
-    status: string;
-    insuranceInfo: any;
-  };
+  saferData?: ICarrierSaferData;
   equipment: string[];
-  preferredLanes: string[];
-  rates: {
-    average: number;
-    lastUpdated: Date;
+  preferredLanes?: string[];
+  rates?: {
+    average?: number;
+    lastUpdated?: Date;
   };
-  performance: {
-    onTimeDelivery: number;
-    totalShipments: number;
-    averageRating: number;
+  performance?: {
+    onTimeDelivery?: number;
+    totalShipments?: number;
+    averageRating?: number;
   };
-  documents: [mongoose.Types.ObjectId];
-  createdAt: Date;
-  updatedAt: Date;
+  documents?: mongoose.Types.ObjectId[];
+  isActive?: boolean;
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const carrierSchema = new Schema<ICarrier>({
-  name: { type: String, required: true },
-  mcNumber: { type: String, required: true, unique: true },
-  dotNumber: { type: String, required: true, unique: true },
+  name: { type: String, required: true, trim: true },
+  mcNumber: { type: String, required: true, unique: true, trim: true, index: true },
+  dotNumber: { type: String, required: true, unique: true, trim: true, index: true },
   address: {
-    street: { type: String, required: true },
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    zip: { type: String, required: true }
+    street: { type: String, required: true, trim: true },
+    city: { type: String, required: true, trim: true },
+    state: { type: String, required: true, trim: true },
+    zip: { type: String, required: true, trim: true },
+    country: { type: String, trim: true, default: 'USA' }
   },
   contact: {
-    name: { type: String, required: true },
-    phone: { type: String, required: true },
-    email: { type: String, required: true }
+    name: { type: String, required: true, trim: true },
+    phone: { type: String, required: true, trim: true },
+    email: { type: String, required: true, trim: true, lowercase: true },
+    fax: { type: String, trim: true }
   },
   saferData: {
     lastUpdated: Date,
     saferRating: String,
     status: String,
-    insuranceInfo: Schema.Types.Mixed
+    insuranceInfo: Schema.Types.Mixed,
+    totalDrivers: Number,
+    totalPowerUnits: Number,
+    carrierOperation: String,
+    hmFlag: String,
+    pcFlag: String,
+    censusType: String,
+    outOfServiceDate: String,
+    mcs150Date: String,
   },
   equipment: [String],
   preferredLanes: [String],
@@ -69,7 +93,8 @@ const carrierSchema = new Schema<ICarrier>({
     totalShipments: { type: Number, default: 0 },
     averageRating: { type: Number, default: 0 }
   },
-  documents: [{ type: Schema.Types.ObjectId, ref: 'Document' }]
+  documents: [{ type: Schema.Types.ObjectId, ref: 'Document' }],
+  isActive: { type: Boolean, default: true, index: true }
 }, {
   timestamps: true
 });
