@@ -1,1 +1,0 @@
-{"version":3,"file":"saferService.d.ts","sourceRoot":"","sources":["../../../src/services/integrations/saferService.ts"],"names":[],"mappings":"AAGA,qBAAa,YAAY;IACvB,OAAO,CAAC,OAAO,CAAuD;IAEhE,oBAAoB,CAAC,SAAS,EAAE,MAAM,GAAG,OAAO,CAAC,GAAG,CAAC;IAgCrD,uBAAuB,CAAC,SAAS,EAAE,MAAM,EAAE,SAAS,EAAE,MAAM,GAAG,OAAO,CAAC,GAAG,CAAC;CAYlF"}
