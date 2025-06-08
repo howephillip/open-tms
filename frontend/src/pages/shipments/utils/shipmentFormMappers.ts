@@ -3,7 +3,7 @@ import {
     Shipment, // Assuming full Shipment interface is available from a shared types file or defined appropriately
     ShipmentFormDataForDialog, 
     QuoteFormData,
-    ModeOfTransportType, // Import these types or define them
+    ModeOfTransportType,
     StatusType,
     LocationType,
     EquipmentUnitType,
@@ -133,6 +133,15 @@ export const mapShipmentToQuoteFormData = (shipment: Shipment): QuoteFormData =>
         scheduledPickupDate: formatDateForInput(shipment.scheduledPickupDate), scheduledDeliveryDate: formatDateForInput(shipment.scheduledDeliveryDate),
         commodityDescription: shipment.commodityDescription || '', totalWeight: (shipment.totalWeight ?? '').toString(), pieceCount: (shipment.pieceCount ?? '').toString(),
         customerRate: (shipment.customerRate ?? 0).toString(), carrierCostTotal: (shipment.carrierCostTotal ?? 0).toString(),
+        
+        // --- START OF THE FIX ---
+        fscType: shipment.fscType || '',
+        fscCustomerAmount: (shipment.fscCustomerAmount ?? '').toString(),
+        fscCarrierAmount: (shipment.fscCarrierAmount ?? '').toString(),
+        chassisCustomerCost: (shipment.chassisCustomerCost ?? '').toString(),
+        chassisCarrierCost: (shipment.chassisCarrierCost ?? '').toString(),
+        // --- END OF THE FIX ---
+
         accessorials: shipment.accessorials?.map(acc => ({
             _id: acc._id?.toString(),
             accessorialTypeId: typeof acc.accessorialTypeId === 'object' ? (acc.accessorialTypeId as any)._id : acc.accessorialTypeId,

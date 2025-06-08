@@ -188,6 +188,13 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
   const handleCloseQuoteForm = () => { setIsQuoteFormOpen(false); setEditingQuoteInitialData(null); if (mode === 'edit' && shipmentIdFromUrl && activeTab === 'quotes') navigate('/shipments', {replace: true}); };
 
   const handleSaveItemForm = (formDataFromDialog: ShipmentFormDataForDialog | QuoteFormData, idToUpdate?: string) => {
+    
+        console.log(
+      "%c[FRONTEND] Submitting data to mutation:",
+      "color: blue; font-weight: bold;",
+      JSON.parse(JSON.stringify(formDataFromDialog)) // Use JSON to see a snapshot, not a live object
+    );
+
     let apiPayload: any;
     const isQuoteForm = formDataFromDialog.status === 'quote';
     const loggedInUserIdPlaceholder = "6653cd3f59985b9329451689"; // REPLACE with actual auth user ID

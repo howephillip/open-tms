@@ -343,205 +343,110 @@ export class ShipmentController {
 
   async updateShipment(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
-    logger.info(`Attempting to update shipment ID: ${id} with body:`, JSON.stringify(req.body, null, 2));
-    if (!mongoose.Types.ObjectId.isValid(id)) { 
-        res.status(400).json({ success: false, message: 'Invalid shipment ID format.' }); 
+    logger.info(`--- UPDATE SHIPMENT - START (ID: ${id}) ---`);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        res.status(400).json({ success: false, message: 'Invalid shipment ID format.' });
         return;
     }
+    
     try {
-      let activeQuoteFormSettings: IQuoteFormSettings = { ...defaultControllerQuoteFormSettings }; 
-      try {
-          const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
-          if (settingsDoc && settingsDoc.settings) {
-              const dbSettings = settingsDoc.settings as IQuoteFormSettings;
-              activeQuoteFormSettings = {
-                  ...defaultControllerQuoteFormSettings, 
-                  ...(settingsDoc.settings as Partial<IQuoteFormSettings>),
-                  requiredFields: dbSettings.requiredFields && dbSettings.requiredFields.length > 0 ? dbSettings.requiredFields : defaultControllerQuoteFormSettings.requiredFields,
-              };
-              logger.info('Loaded quote form settings from DB for update validation:', activeQuoteFormSettings.requiredFields);
-          } else {
-              logger.warn('No quote form settings found in DB for update validation, using controller defaults:', activeQuoteFormSettings.requiredFields);
-          }
-      } catch (settingsError: any) {
-          logger.error('Error fetching quoteForm settings for update, using controller defaults:', settingsError.message);
-      }
-
-      const {
-        documentIds,
-        accessorials: accessorialsData,
-        fscType, fscCustomerAmount, fscCarrierAmount,
-        chassisCustomerCost, chassisCarrierCost,
-        ...shipmentPayload
-      } = req.body;
-      const shipmentDataToUpdate: Partial<IShipment> = { ...shipmentPayload };
-
-      const missingFieldsUpdate: string[] = [];
-      if (shipmentDataToUpdate.status === 'quote') {
-        logger.info('Validating UPDATED QUOTE using settings:', activeQuoteFormSettings.requiredFields);
-        (activeQuoteFormSettings.requiredFields || []).forEach(fieldId => {
-            const value = getFieldValue(shipmentDataToUpdate, fieldId);
-            if (fieldId === 'carrier' && !shipmentDataToUpdate.carrier) { return; }
-            
-            let fieldExistsInPayload = shipmentPayload.hasOwnProperty(fieldId);
-            if (!fieldExistsInPayload && fieldId.startsWith('origin')) {
-                const subFieldParts = fieldId.split('.');
-                if (subFieldParts.length > 1 && shipmentPayload.origin?.hasOwnProperty(subFieldParts[1])) {
-                    fieldExistsInPayload = true;
-                }
-            } else if (!fieldExistsInPayload && fieldId.startsWith('destination')) {
-                const subFieldParts = fieldId.split('.');
-                 if (subFieldParts.length > 1 && shipmentPayload.destination?.hasOwnProperty(subFieldParts[1])) {
-                    fieldExistsInPayload = true;
-                }
-            }
-
-            if (fieldExistsInPayload && (value === undefined || value === null || (typeof value === 'string' && value.trim() === ''))) {
-                missingFieldsUpdate.push(fieldId);
-            }
-        });
-      } else if (shipmentDataToUpdate.status && (shipmentDataToUpdate.status as ShipmentStatusType) !== 'quote') { // Explicit cast for comparison
-        logger.info('Validating UPDATED non-quote SHIPMENT.');
-         const universallyRequiredForBooked = [
-            'shipper', 'carrier', 'modeOfTransport',
-            'origin.city', 'origin.state', 
-            'destination.city', 'destination.state',
-            'scheduledPickupDate', 'scheduledDeliveryDate', 
-            'equipmentType', 'commodityDescription',
-            'customerRate', 'carrierCostTotal'
-        ];
-        universallyRequiredForBooked.forEach(fieldId => {
-            const value = getFieldValue(shipmentDataToUpdate, fieldId);
-            let fieldInPayload = shipmentPayload.hasOwnProperty(fieldId);
-             if (!fieldInPayload && fieldId.startsWith('origin')) {
-                const subFieldParts = fieldId.split('.');
-                if (subFieldParts.length > 1 && shipmentPayload.origin?.hasOwnProperty(subFieldParts[1])) fieldInPayload = true;
-            } else if (!fieldInPayload && fieldId.startsWith('destination')) {
-                const subFieldParts = fieldId.split('.');
-                if (subFieldParts.length > 1 && shipmentPayload.destination?.hasOwnProperty(subFieldParts[1])) fieldInPayload = true;
-            }
-            if (fieldInPayload && (value === undefined || value === null || (typeof value === 'string' && value.trim() === ''))) {
-                missingFieldsUpdate.push(fieldId);
-            }
-        });
-      }
-
-      if (missingFieldsUpdate.length > 0) {
-        const uniqueMissing = [...new Set(missingFieldsUpdate)];
-        logger.warn(`Validation Error on update: Missing/empty required fields: ${uniqueMissing.join(', ')}.`);
-        res.status(400).json({ success: false, message: `Missing or empty required fields for update: ${uniqueMissing.join(', ')}.` });
-        return;
-      }
-
-      if (req.user?._id) { 
-        shipmentDataToUpdate.updatedBy = new mongoose.Types.ObjectId(req.user._id.toString()); 
-      } else { 
-        const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id').lean(); 
-        if (defaultUser) shipmentDataToUpdate.updatedBy = defaultUser._id; 
-      }
-
-      if (shipmentDataToUpdate.hasOwnProperty('shipper')) {
-        const shipperValue = shipmentDataToUpdate.shipper;
-        if (typeof shipperValue === 'string') {
-            if (shipperValue.trim() === '') {
-                logger.warn(`Attempt to clear required field 'shipper' during update for shipment ID: ${id}`);
-                res.status(400).json({ success: false, message: "Shipper is a required field and cannot be empty." }); return;
-            } else if (mongoose.Types.ObjectId.isValid(shipperValue)) {
-                shipmentDataToUpdate.shipper = new mongoose.Types.ObjectId(shipperValue);
-            } else {
-                res.status(400).json({success:false, message: "Invalid Shipper ID format for update"}); return;
-            }
-        } else if (shipperValue === null || shipperValue === undefined) {
-            logger.warn(`Shipper ID is missing or null during update for shipment ID: ${id}`);
-            res.status(400).json({ success: false, message: 'Shipper ID is required.' }); return;
+        const originalDoc = await Shipment.findById(id).lean();
+        if (!originalDoc) {
+             return res.status(404).json({ success: false, message: 'Shipment not found' });
         }
-      }
-      
-      if (shipmentDataToUpdate.hasOwnProperty('carrier')) {
-        const carrierValue = shipmentDataToUpdate.carrier;
-        if (typeof carrierValue === 'string') {
-            if (carrierValue.trim() === '') {
-               delete shipmentDataToUpdate.carrier;
-            } else if (mongoose.Types.ObjectId.isValid(carrierValue)) {
-                shipmentDataToUpdate.carrier = new mongoose.Types.ObjectId(carrierValue);
-            } else { 
-                res.status(400).json({success:false, message: "Invalid Carrier ID format for update"}); return;
+        
+        const updateData = req.body;
+        
+        // --- CORRECTED MERGE LOGIC ---
+        // Start with the original document, then carefully apply updates.
+        const finalState = { ...originalDoc };
+
+        for (const key in updateData) {
+            if (Object.prototype.hasOwnProperty.call(updateData, key)) {
+                // This will overwrite originalDoc fields with what came from the frontend.
+                // If a field was empty on the form (like fscType), it will be `""` here.
+                (finalState as any)[key] = updateData[key];
             }
-        } else if (carrierValue === null || carrierValue === undefined) {
-           delete shipmentDataToUpdate.carrier;
         }
-      }
-
-      if (shipmentPayload.hasOwnProperty('otherReferenceNumbersString')) {
-        if (typeof shipmentPayload.otherReferenceNumbersString === 'string' && shipmentPayload.otherReferenceNumbersString.trim() !== '') {
-            try {
-                shipmentDataToUpdate.otherReferenceNumbers = shipmentPayload.otherReferenceNumbersString.split(',')
-                    .map((refStr: string) => { const parts = refStr.split(':'); const type = parts[0]?.trim(); const value = parts.slice(1).join(':')?.trim(); return { type, value }; })
-                    .filter((ref: any) => ref.type && ref.value) as IReferenceNumber[];
-            } catch (e) { logger.warn("Could not parse otherReferenceNumbersString for update.", e); shipmentDataToUpdate.otherReferenceNumbers = [];}
-        } else if (shipmentPayload.otherReferenceNumbersString === '') {
-            shipmentDataToUpdate.otherReferenceNumbers = []; 
+        
+        // --- Start Financial Calculations on the merged `finalState` ---
+        const lineHaulCustomer = parseFloat(String(finalState.customerRate)) || 0;
+        const lineHaulCarrier = parseFloat(String(finalState.carrierCostTotal)) || 0;
+        
+        let fscCustomerValue = 0;
+        if (finalState.fscType === 'percentage' && finalState.fscCustomerAmount) {
+            fscCustomerValue = lineHaulCustomer * (parseFloat(String(finalState.fscCustomerAmount)) / 100);
+        } else if (finalState.fscType === 'fixed' && finalState.fscCustomerAmount) {
+            fscCustomerValue = parseFloat(String(finalState.fscCustomerAmount));
         }
-      } else if (shipmentPayload.hasOwnProperty('otherReferenceNumbers') && Array.isArray(shipmentPayload.otherReferenceNumbers)) {
-        shipmentDataToUpdate.otherReferenceNumbers = shipmentPayload.otherReferenceNumbers.filter( (ref: any) => typeof ref === 'object' && ref.type && ref.value ) as IReferenceNumber[];
-      }
 
-      if (documentIds !== undefined) {
-        if (Array.isArray(documentIds)) {
-          shipmentDataToUpdate.documents = documentIds.filter(docId => typeof docId === 'string' && mongoose.Types.ObjectId.isValid(docId)).map(docId => new mongoose.Types.ObjectId(docId));
-        } else { logger.warn(`documentIds received for update of shipment ${id} but was not an array. Ignoring.`); delete shipmentDataToUpdate.documents; }
-      }
-
-      if (accessorialsData !== undefined) {
-        if (Array.isArray(accessorialsData)) {
-          shipmentDataToUpdate.accessorials = accessorialsData.map((acc: any) => ({
-            accessorialTypeId: new mongoose.Types.ObjectId(acc.accessorialTypeId), name: acc.name,
-            quantity: parseFloat(acc.quantity) || 1, customerRate: parseFloat(acc.customerRate) || 0,
-            carrierCost: parseFloat(acc.carrierCost) || 0, notes: acc.notes,
-            _id: acc._id && mongoose.Types.ObjectId.isValid(acc._id) ? new mongoose.Types.ObjectId(acc._id) : new mongoose.Types.ObjectId()
-          })).filter((acc: any) => mongoose.Types.ObjectId.isValid(acc.accessorialTypeId));
-        } else if (accessorialsData === null) {
-            shipmentDataToUpdate.accessorials = []; 
-        } else { 
-            delete shipmentDataToUpdate.accessorials; 
+        let fscCarrierValue = 0;
+        if (finalState.fscType === 'percentage' && finalState.fscCarrierAmount) {
+            fscCarrierValue = lineHaulCarrier * (parseFloat(String(finalState.fscCarrierAmount)) / 100);
+        } else if (finalState.fscType === 'fixed' && finalState.fscCarrierAmount) {
+            fscCarrierValue = parseFloat(String(finalState.fscCarrierAmount));
         }
-      }
 
-      if (shipmentPayload.hasOwnProperty('fscType')) shipmentDataToUpdate.fscType = fscType === '' ? undefined : fscType;
-      if (shipmentPayload.hasOwnProperty('fscCustomerAmount')) shipmentDataToUpdate.fscCustomerAmount = (fscCustomerAmount === '' || fscCustomerAmount === null) ? undefined : parseFloat(fscCustomerAmount);
-      if (shipmentPayload.hasOwnProperty('fscCarrierAmount')) shipmentDataToUpdate.fscCarrierAmount = (fscCarrierAmount === '' || fscCarrierAmount === null) ? undefined : parseFloat(fscCarrierAmount);
+        const chassisCustomerCost = parseFloat(String(finalState.chassisCustomerCost)) || 0;
+        const chassisCarrierCost = parseFloat(String(finalState.chassisCarrierCost)) || 0;
 
-      if (shipmentPayload.hasOwnProperty('chassisCustomerCost')) shipmentDataToUpdate.chassisCustomerCost = (chassisCustomerCost === '' || chassisCustomerCost === null) ? undefined : parseFloat(chassisCustomerCost);
-      if (shipmentPayload.hasOwnProperty('chassisCarrierCost')) shipmentDataToUpdate.chassisCarrierCost = (chassisCarrierCost === '' || chassisCarrierCost === null) ? undefined : parseFloat(chassisCarrierCost);
+        let totalAccessorialsCustomerCost = 0;
+        let totalAccessorialsCarrierCost = 0;
+        
+        const accessorials = finalState.accessorials;
+        if (Array.isArray(accessorials)) {
+            accessorials.forEach((acc: any) => {
+                totalAccessorialsCustomerCost += (parseFloat(String(acc.customerRate)) || 0) * (parseFloat(String(acc.quantity)) || 1);
+                totalAccessorialsCarrierCost += (parseFloat(String(acc.carrierCost)) || 0) * (parseFloat(String(acc.quantity)) || 1);
+            });
+        }
+        
+        const totalCustomerRate = lineHaulCustomer + fscCustomerValue + chassisCustomerCost + totalAccessorialsCustomerCost;
+        const totalCarrierCost = lineHaulCarrier + fscCarrierValue + chassisCarrierCost + totalAccessorialsCarrierCost;
+        const grossProfit = totalCustomerRate - totalCarrierCost;
+        const margin = totalCustomerRate > 0 ? (grossProfit / totalCustomerRate) * 100 : 0;
+        
+        // --- Build the final update payload, including calculated fields ---
+        const updatePayload: Record<string, any> = {
+            ...updateData,
+            totalCustomerRate,
+            totalCarrierCost,
+            grossProfit,
+            margin,
+        };
 
+        if (req.user?._id) {
+            updatePayload.updatedBy = new mongoose.Types.ObjectId(req.user._id.toString());
+        }
 
-      const dateFieldsToUpdate: (keyof Partial<IShipment>)[] = ['lastFreeDayPort', 'lastFreeDayRail', 'emptyContainerReturnByDate', 'chassisReturnByDate', 'transloadDate', 'scheduledPickupDate', 'scheduledDeliveryDate', 'actualPickupDateTime', 'actualDeliveryDateTime', 'quoteValidUntil'];
-      dateFieldsToUpdate.forEach(field => { if (shipmentDataToUpdate.hasOwnProperty(field)) { const dateString = (shipmentDataToUpdate as any)[field]; if (dateString && typeof dateString === 'string') { const dateVal = new Date(dateString); if (!isNaN(dateVal.getTime())) (shipmentDataToUpdate as any)[field] = dateVal; else { (shipmentDataToUpdate as any)[field] = undefined; }} else if (dateString === null || dateString === '') { (shipmentDataToUpdate as any)[field] = null; }}});
-      delete (shipmentDataToUpdate as any)._id;
+        // --- Atomically update the document in the database ---
+        const updatedShipment = await Shipment.findByIdAndUpdate(
+            id,
+            { $set: updatePayload }, 
+            { new: true, runValidators: true, context: 'query' }
+        )
+        .populate([
+            { path: 'shipper', select: 'name' },
+            { path: 'carrier', select: 'name' },
+            { path: 'createdBy', select: 'firstName lastName email'},
+            { path: 'updatedBy', select: 'firstName lastName email'},
+            { path: 'documents', select: 'originalName _id mimetype size createdAt path'},
+            { path: 'accessorials.accessorialTypeId', model: 'AccessorialType', select: 'name code unitName' }
+        ]).lean();
 
-      const updatedShipmentDocument = await Shipment.findByIdAndUpdate(id, { $set: shipmentDataToUpdate }, { new: true, runValidators: true });
+        logger.info('Shipment update successful and persisted to DB.', { shipmentId: updatedShipment?._id });
+        res.status(200).json({ success: true, data: updatedShipment, message: 'Shipment updated successfully' });
 
-      if (!updatedShipmentDocument) {
-        res.status(404).json({ success: false, message: 'Shipment not found' });
-        return;
-      }
-      logger.info('Shipment updated successfully', { shipmentId: updatedShipmentDocument._id });
-      
-      const populatedShipment = await Shipment.findById(updatedShipmentDocument._id)
-        .populate({ path: 'shipper', select: 'name' }).populate({ path: 'carrier', select: 'name' })
-        .populate({ path: 'createdBy', select: 'firstName lastName email'}).populate({ path: 'updatedBy', select: 'firstName lastName email'})
-        .populate({ path: 'documents', select: 'originalName _id mimetype size createdAt path'})
-        .populate({ path: 'accessorials.accessorialTypeId', select: 'name code unitName' })
-        .lean();
-
-      res.status(200).json({ success: true, data: populatedShipment, message: 'Shipment updated successfully' });
     } catch (error: any) {
-      logger.error('CRITICAL ERROR in updateShipment:', { message: error.message, name: error.name, stack: error.stack, shipmentId: id, requestBody: req.body, errorObject: JSON.stringify(error, Object.getOwnPropertyNames(error), 2)});
-      if (error.name === 'ValidationError') res.status(400).json({ success: false, message: error.message, errors: error.errors });
-      else if (error.code === 11000) res.status(409).json({ success: false, message: `Duplicate key error on update. Field: ${JSON.stringify(error.keyValue)}`, errorDetails: error.keyValue });
-      else res.status(500).json({ success: false, message: 'Error updating shipment', errorDetails: error.message });
+        logger.error(`CRITICAL ERROR in updateShipment (ID: ${id}):`, { message: error.message, stack: error.stack });
+        if (error.name === 'ValidationError') {
+            res.status(400).json({ success: false, message: error.message, errors: error.errors });
+        } else {
+            res.status(500).json({ success: false, message: 'Error updating shipment', errorDetails: error.message });
+        }
     }
   }
+
 
   async getShipmentById(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;

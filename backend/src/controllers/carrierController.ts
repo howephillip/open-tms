@@ -175,23 +175,43 @@ export class CarrierController {
         res.status(404).json({ success: false, message: 'Carrier not found.' }); 
         return; 
       }
+      
       if (!carrier.dotNumber) { 
+        logger.warn(`Carrier ${carrier.name} (ID: ${id}) does not have a DOT number to look up.`);
         res.status(400).json({ success: false, message: 'Carrier does not have a DOT number.' }); 
         return; 
       }
+
+      // Call the service with the DOT number
       const safetyData = await saferService.getCarrierSafetyData(carrier.dotNumber);
+
       if (safetyData) {
         carrier.saferData = { ...(carrier.saferData || {}), ...safetyData, lastUpdated: new Date() };
+        
+        // Also update the main carrier record with the authoritative data from SAFER
+        carrier.name = safetyData.legalName || carrier.name;
+        if(safetyData.dotNumber) carrier.dotNumber = safetyData.dotNumber;
+        
+        // The API returns MC as a string like "MC-123456", we only want the number
+        const mcNumberFromApi = safetyData.mcNumber?.replace('MC-', '');
+        if(mcNumberFromApi) carrier.mcNumber = mcNumberFromApi;
+
+        if (safetyData.address) {
+            carrier.address.street = safetyData.address.street || carrier.address.street;
+            carrier.address.city = safetyData.address.city || carrier.address.city;
+            carrier.address.state = safetyData.address.state || carrier.address.state;
+            carrier.address.zip = safetyData.address.zip || carrier.address.zip;
+        }
+
         await carrier.save();
         logger.info(`SAFER data updated for carrier: ${carrier.name}`);
         res.status(200).json({ success: true, message: 'SAFER data updated successfully.', data: carrier });
       } else {
-        logger.warn(`No SAFER data found for DOT: ${carrier.dotNumber}`);
         res.status(404).json({ success: false, message: `No SAFER data found for DOT: ${carrier.dotNumber}` });
       }
     } catch (error: any) {
-      logger.error('CRITICAL ERROR in updateSaferDataForCarrier:', { message: error.message, name: error.name, carrierId: id});
-      res.status(500).json({ success: false, message: 'Error updating SAFER data.', errorDetails: error.message });
+      logger.error('CRITICAL ERROR in updateSaferDataForCarrier:', { message: error.message, carrierId: id });
+      res.status(500).json({ success: false, message: error.message || 'Error updating SAFER data.' });
     }
   }
 

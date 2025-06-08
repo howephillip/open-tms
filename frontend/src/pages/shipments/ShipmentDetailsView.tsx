@@ -33,6 +33,7 @@ interface IReferenceNumberFE { type: string; value: string; _id?: string; }
 type ModeOfTransportType = string; type StatusType = string; type LocationType = string;
 interface CheckIn { dateTime: string | Date; method: string; notes: string; contactPerson?: string; currentLocation?: string; statusUpdate?: StatusType; createdBy?: UserStub | string; _id?: string;}
 interface IDocumentStub { _id: string; originalName: string; mimetype: string; size: number; createdAt: string; path: string;} // path is key for download
+interface IQuoteAccessorialFE { accessorialTypeId: { name?: string }; name?: string; customerRate: number; quantity?: number; } // Simplified for display
 interface Shipment {
   _id: string; shipmentNumber: string; shipper: ShipperStub | string | null; carrier: CarrierStub | string | null; modeOfTransport: ModeOfTransportType;
   billOfLadingNumber?: string; proNumber?: string; deliveryOrderNumber?: string; bookingNumber?: string;
@@ -54,9 +55,15 @@ interface Shipment {
   commodityDescription: string; pieceCount?: number; packageType?: string; totalWeight?: number;
   weightUnit?: 'lbs' | 'kg'; isHazardous?: boolean; unNumber?: string; hazmatClass?: string;
   isTemperatureControlled?: boolean; temperatureMin?: number; temperatureMax?: number; tempUnit?: 'C' | 'F';
-  customerRate: number; carrierCostTotal: number; grossProfit?: number; margin?: number;
+  customerRate: number; carrierCostTotal: number;
+  fscType?: 'fixed' | 'percentage'; fscCustomerAmount?: number; fscCarrierAmount?: number;
+  chassisCustomerCost?: number; chassisCarrierCost?: number;
+  grossProfit?: number; margin?: number; totalCustomerRate?: number; totalCarrierCost?: number;
   internalNotes?: string; specialInstructions?: string; customTags?: string[];
   checkIns?: CheckIn[]; documents?: IDocumentStub[]; createdBy?: UserStub | string; updatedAt?: string; createdAt?: string;
+  accessorials?: IQuoteAccessorialFE[]; // Added for financial breakdown
+  consignee?: { name?: string; }; // Added for display
+  billTo?: ShipperStub | CarrierStub | string | null; // Added for display
 }
 
 const formatDisplayDateTime = (dateTimeString?: string | Date): string => { if (!dateTimeString) return 'N/A'; try { return new Date(dateTimeString).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute:'2-digit' }); } catch (e) { return 'Invalid Date';}};
@@ -134,7 +141,6 @@ const ShipmentDetailsView: React.FC = () => {
                         <Grid item xs={12} sm={6}><Typography><strong>Shipper:</strong> <Link component={RouterLink} to={`/shippers/${typeof shipment.shipper === 'object' ? shipment.shipper?._id : ''}`}>{getDisplayName(shipment.shipper)}</Link></Typography></Grid>
                         <Grid item xs={12} sm={6}><Typography><strong>Carrier:</strong> <Link component={RouterLink} to={`/carriers/${typeof shipment.carrier === 'object' ? shipment.carrier?._id : ''}`}>{getDisplayName(shipment.carrier)}</Link></Typography></Grid>
                         {shipment.consignee?.name && <Grid item xs={12}><Typography><strong>Consignee:</strong> {shipment.consignee.name}</Typography></Grid>}
-                        {/* Assuming billTo might be populated like shipper/carrier */}
                         {shipment.billTo && <Grid item xs={12}><Typography><strong>Bill To:</strong> {getDisplayName(shipment.billTo as any)}</Typography></Grid>} 
                     </Grid>
                 </Paper>
@@ -233,13 +239,77 @@ const ShipmentDetailsView: React.FC = () => {
                     {shipment.isHazardous && <Typography color="error"><strong>Hazardous:</strong> Yes (UN: {shipment.unNumber || 'N/A'}, Class: {shipment.hazmatClass || 'N/A'})</Typography>}
                     {shipment.isTemperatureControlled && <Typography><strong>Temp Control:</strong> {shipment.temperatureMin}{shipment.tempUnit} - {shipment.temperatureMax}{shipment.tempUnit}</Typography>}
                 </Paper>
-                <Paper variant="outlined" sx={{p:2, mb:2}}>
+                
+                {/* --- CORRECTED FINANCIALS SECTION --- */}
+                <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
                     <Typography variant="h6" gutterBottom>Financials</Typography>
-                    <Typography><strong>Customer Rate:</strong> ${shipment.customerRate?.toLocaleString()}</Typography>
-                    <Typography><strong>Carrier Cost:</strong> ${shipment.carrierCostTotal?.toLocaleString()}</Typography>
-                    <Typography><strong>Gross Profit:</strong> ${shipment.grossProfit?.toLocaleString()}</Typography>
-                    <Typography><strong>Margin:</strong> {shipment.margin?.toFixed(2)}%</Typography>
+                    <Grid container spacing={0.5}>
+                        <Grid item xs={6}>
+                            <Typography><strong>Total Quoted Rate:</strong></Typography>
+                        </Grid>
+                        <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                            <Typography><strong>${shipment.totalCustomerRate?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || shipment.customerRate?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></Typography>
+                        </Grid>
+
+                        <Grid item xs={6}>
+                            <Typography color="text.secondary" pl={2}>↳ Line Haul:</Typography>
+                        </Grid>
+                         <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                            <Typography color="text.secondary">${shipment.customerRate?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography>
+                        </Grid>
+                        
+                        {shipment.chassisCustomerCost && shipment.chassisCustomerCost > 0 && (
+                          <>
+                            <Grid item xs={6}><Typography color="text.secondary" pl={2}>↳ Chassis:</Typography></Grid>
+                            <Grid item xs={6} sx={{ textAlign: 'right' }}><Typography color="text.secondary">${shipment.chassisCustomerCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></Grid>
+                          </>
+                        )}
+                        
+                        {shipment.fscCustomerAmount != null && shipment.fscCustomerAmount > 0 && (
+                           <>
+                            <Grid item xs={6}><Typography color="text.secondary" pl={2}>↳ FSC ({shipment.fscType === 'percentage' ? `${shipment.fscCustomerAmount}%` : 'Fixed'}):</Typography></Grid>
+                            <Grid item xs={6} sx={{ textAlign: 'right' }}><Typography color="text.secondary">${((shipment.fscType === 'percentage' ? shipment.customerRate * (shipment.fscCustomerAmount/100) : shipment.fscCustomerAmount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></Grid>
+                          </>
+                        )}
+
+                        {shipment.accessorials && shipment.accessorials?.filter(a => a.customerRate > 0).map((acc, index) => (
+                          <React.Fragment key={`cust-acc-${index}`}>
+                             <Grid item xs={6}><Typography color="text.secondary" pl={2}>↳ {(acc.accessorialTypeId as any)?.name || acc.name || 'Accessorial'}:</Typography></Grid>
+                             <Grid item xs={6} sx={{ textAlign: 'right' }}><Typography color="text.secondary">${(acc.customerRate * (acc.quantity || 1)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Typography></Grid>
+                          </React.Fragment>
+                        ))}
+
+                        <Grid item xs={12}><Divider sx={{ my: 1 }} light/></Grid>
+
+                        <Grid item xs={6}>
+                            <Typography><strong>Total Carrier Cost:</strong></Typography>
+                        </Grid>
+                        <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                            <Typography><strong>${shipment.totalCarrierCost?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || shipment.carrierCostTotal?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></Typography>
+                        </Grid>
+
+                        <Grid item xs={12}><Divider sx={{ my: 1 }} light/></Grid>
+
+                        <Grid item xs={6}>
+                            <Typography><strong>Gross Profit:</strong></Typography>
+                        </Grid>
+                         <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                            <Typography color={shipment.grossProfit && shipment.grossProfit < 0 ? 'error' : 'success.main'}>
+                                <strong>${shipment.grossProfit?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                            </Typography>
+                        </Grid>
+
+                        <Grid item xs={6}>
+                            <Typography><strong>Margin:</strong></Typography>
+                        </Grid>
+                        <Grid item xs={6} sx={{ textAlign: 'right' }}>
+                             <Typography color={shipment.margin && shipment.margin < 0 ? 'error' : 'success.main'}>
+                                <strong>{shipment.margin?.toFixed(2)}%</strong>
+                            </Typography>
+                        </Grid>
+                    </Grid>
                 </Paper>
+                
                  <Paper variant="outlined" sx={{p:2, mb:2}}>
                     <Typography variant="h6" gutterBottom>Notes & Tags</Typography>
                     {shipment.internalNotes && <Box mb={1}><Typography variant="subtitle2">Internal Notes:</Typography><Typography variant="body2" sx={{whiteSpace: 'pre-wrap'}}>{shipment.internalNotes}</Typography></Box>}

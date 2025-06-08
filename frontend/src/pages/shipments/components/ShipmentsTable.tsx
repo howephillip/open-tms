@@ -7,7 +7,7 @@ import {
 import {
   Edit as EditIcon, Visibility as ViewIcon,
   CheckCircleOutline as CheckIcon, EmailOutlined as EmailIcon,
-  DeleteOutline as DeleteIcon, // Import DeleteIcon
+  DeleteOutline as DeleteIcon,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 
@@ -26,6 +26,7 @@ interface ShipmentRowData {
   containerNumber?: string;
   proNumber?: string;
   customerRate?: number;
+  totalCustomerRate?: number; // Added this field to the interface
 }
 
 interface ShipmentsTableProps {
@@ -36,7 +37,7 @@ interface ShipmentsTableProps {
   onViewDetails: (item: ShipmentRowData) => void;
   onAddCheckIn: (item: ShipmentRowData) => void;
   onGenerateEmail: (item: ShipmentRowData) => void;
-  onDeleteItem: (item: ShipmentRowData) => void; // New prop for delete
+  onDeleteItem: (item: ShipmentRowData) => void;
   getDisplayName: (entity: ShipperCarrierStub | string | null | undefined) => string;
   getStatusColor: (status: string | undefined) => "default" | "primary" | "secondary" | "warning" | "info" | "success" | "error";
 }
@@ -44,7 +45,7 @@ interface ShipmentsTableProps {
 const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
   items, isLoading, activeTab,
   onEditItem, onViewDetails, onAddCheckIn, onGenerateEmail,
-  onDeleteItem, // Destructure new prop
+  onDeleteItem,
   getDisplayName, getStatusColor
 }) => {
   return (
@@ -62,7 +63,7 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
             <TableCell sx={{minWidth: 100}}>Delivery</TableCell>
             <TableCell sx={{minWidth: 120}}>{activeTab === 'quotes' ? 'Quoted Rate' : 'Container #'}</TableCell>
             <TableCell sx={{minWidth: 120}}>PRO #</TableCell>
-            <TableCell align="center" sx={{minWidth: 180}}>Actions</TableCell> {/* Increased minWidth for more icons */}
+            <TableCell align="center" sx={{minWidth: 180}}>Actions</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -87,7 +88,14 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
                 <TableCell><Chip label={item.status?.replace(/_/g,' ') || 'N/A'} color={getStatusColor(item.status)} size="small" sx={{textTransform: 'capitalize'}} /></TableCell>
                 <TableCell>{item.scheduledPickupDate ? new Date(item.scheduledPickupDate).toLocaleDateString() : 'N/A'}</TableCell>
                 <TableCell>{item.scheduledDeliveryDate ? new Date(item.scheduledDeliveryDate).toLocaleDateString() : 'N/A'}</TableCell>
-                <TableCell>{activeTab === 'quotes' ? `$${item.customerRate?.toLocaleString() || 'N/A'}` : item.containerNumber || 'N/A'}</TableCell>
+                
+                {/* --- CORRECTED RATE DISPLAY --- */}
+                <TableCell>
+                  {activeTab === 'quotes' 
+                    ? `$${(item.totalCustomerRate ?? item.customerRate)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'}` 
+                    : item.containerNumber || 'N/A'}
+                </TableCell>
+
                 <TableCell>{item.proNumber || 'N/A'}</TableCell>
                 <TableCell align="center">
                   <Tooltip title="Add Check-in"><IconButton size="small" onClick={() => onAddCheckIn(item)} disabled={activeTab === 'quotes'}><CheckIcon fontSize="inherit"/></IconButton></Tooltip>
