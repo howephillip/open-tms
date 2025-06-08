@@ -450,87 +450,50 @@ export class LaneRateController {
     }
 
     try {
-      const existingLaneRate = await LaneRate.findById(id);
-      if (!existingLaneRate) {
+      const updateData = req.body;
+      const setPayload: Record<string, any> = {};
+      const unsetPayload: Record<string, any> = {};
+      
+      // Separate fields to set from fields to unset
+      for (const key in updateData) {
+        if (Object.prototype.hasOwnProperty.call(updateData, key)) {
+          const value = updateData[key];
+          if (value === null) {
+            unsetPayload[key] = ""; // Use "" for $unset
+          } else {
+            setPayload[key] = value;
+          }
+        }
+      }
+
+      if (req.user?._id) {
+          setPayload.updatedBy = new mongoose.Types.ObjectId(req.user._id.toString());
+      }
+      
+      const updateOperation: any = {};
+      if (Object.keys(setPayload).length > 0) {
+        updateOperation.$set = setPayload;
+      }
+      if (Object.keys(unsetPayload).length > 0) {
+        updateOperation.$unset = unsetPayload;
+      }
+
+      logger.info(`Final update operation for manual lane rate ID ${id}:`, JSON.stringify(updateOperation, null, 2));
+
+      const updatedLaneRate = await LaneRate.findByIdAndUpdate(id, updateOperation, { new: true, runValidators: true });
+
+      if (!updatedLaneRate) {
         res.status(404).json({ success: false, message: 'Lane rate entry not found.' });
         return;
       }
-
-      const {
-        originCity, originState, destinationCity, destinationState,
-        carrier, lineHaulCost, modeOfTransport,
-        originZip, destinationZip, lineHaulRate, fscPercentage,
-        chassisCostCarrier, chassisCostCustomer,
-        manualAccessorials,
-        rateDate, rateValidUntil, equipmentType, notes, isActive
-      } = req.body;
-
-      const coreUpdateMissing = [];
-      if (originCity === '') coreUpdateMissing.push('originCity');
-      if (originState === '') coreUpdateMissing.push('originState');
-      if (destinationCity === '') coreUpdateMissing.push('destinationCity');
-      if (destinationState === '') coreUpdateMissing.push('destinationState');
-      if (carrier === '') coreUpdateMissing.push('carrier');
-      if (lineHaulCost === '' || lineHaulCost === null || lineHaulCost === undefined) coreUpdateMissing.push('lineHaulCost');
-      if (modeOfTransport === '') coreUpdateMissing.push('modeOfTransport');
-
-      if (coreUpdateMissing.length > 0) {
-          logger.warn(`Validation failed for lane rate update. Core fields cannot be empty. ID: ${id}. Missing: ${coreUpdateMissing.join(', ')}`);
-          res.status(400).json({ success: false, message: `Core fields cannot be empty: ${coreUpdateMissing.join(', ')}.` });
-          return;
-      }
-      if (carrier && !mongoose.Types.ObjectId.isValid(carrier)) {
-         res.status(400).json({ success: false, message: 'Invalid Carrier ID format for update.' });
-         return;
-      }
-
-      existingLaneRate.originCity = originCity;
-      existingLaneRate.originState = originState;
-      existingLaneRate.destinationCity = destinationCity;
-      existingLaneRate.destinationState = destinationState;
-      if (carrier) existingLaneRate.carrier = new mongoose.Types.ObjectId(carrier);
-      existingLaneRate.lineHaulCost = parseFloat(lineHaulCost);
-      existingLaneRate.modeOfTransport = modeOfTransport;
-
-      existingLaneRate.originZip = originZip || undefined;
-      existingLaneRate.destinationZip = destinationZip || undefined;
       
-      existingLaneRate.lineHaulRate = (lineHaulRate !== 0 && lineHaulRate !== null && lineHaulRate !== '') ? parseFloat(lineHaulRate) : undefined;
-      existingLaneRate.fscPercentage = (fscPercentage !== undefined && fscPercentage !== null && fscPercentage !== '') ? parseFloat(fscPercentage) : undefined;
-      existingLaneRate.chassisCostCarrier = (chassisCostCarrier !== undefined && chassisCostCarrier !== null && chassisCostCarrier !== '') ? parseFloat(chassisCostCarrier) : undefined;
-      existingLaneRate.chassisCostCustomer = (chassisCostCustomer !== undefined && chassisCostCustomer !== null && chassisCostCustomer !== '') ? parseFloat(chassisCostCustomer) : undefined;
-
-      existingLaneRate.rateDate = rateDate ? new Date(rateDate) : existingLaneRate.rateDate;
-      existingLaneRate.rateValidUntil = rateValidUntil ? new Date(rateValidUntil) : undefined;
-      existingLaneRate.equipmentType = equipmentType || undefined;
-      existingLaneRate.notes = notes || undefined;
-      if (isActive !== undefined) existingLaneRate.isActive = isActive;
-
-      if (Array.isArray(manualAccessorials)) {
-        existingLaneRate.manualAccessorials = manualAccessorials
-          .filter(acc => typeof acc.name === 'string' && acc.name.trim() !== '' && acc.cost !== undefined && acc.cost !== null && acc.cost !== '')
-          .map(acc => ({
-            _id: acc._id && mongoose.Types.ObjectId.isValid(acc._id) ? new mongoose.Types.ObjectId(acc._id) : new mongoose.Types.ObjectId(),
-            name: acc.name.trim(),
-            cost: parseFloat(String(acc.cost)),
-            notes: acc.notes || undefined,
-          })) as IManualAccessorial[];
-      } else if (manualAccessorials === null || (Array.isArray(manualAccessorials) && manualAccessorials.length === 0)) {
-        existingLaneRate.manualAccessorials = [];
-      }
-
-      if (req.user?._id && mongoose.Types.ObjectId.isValid(req.user._id.toString())) {
-          existingLaneRate.updatedBy = new mongoose.Types.ObjectId(req.user._id.toString());
-      }
-
-      await existingLaneRate.save();
-      logger.info('Lane rate updated successfully:', existingLaneRate._id);
-
-      const populatedLaneRate = await LaneRate.findById(existingLaneRate._id)
-            .populate('carrier', 'name mcNumber')
-            .populate('createdBy', 'firstName lastName email')
-            .populate('updatedBy', 'firstName lastName email')
-            .lean();
+      logger.info('Lane rate updated successfully:', updatedLaneRate._id);
+      
+      const populatedLaneRate = await updatedLaneRate.populate([
+          { path: 'carrier', select: 'name mcNumber' },
+          { path: 'createdBy', select: 'firstName lastName email' },
+          { path: 'updatedBy', select: 'firstName lastName email' },
+      ]);
 
       res.status(200).json({ success: true, data: populatedLaneRate, message: 'Lane rate updated.' });
 

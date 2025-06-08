@@ -1,4 +1,4 @@
-// File: frontend/src/pages/carriers/CarrierDetailsView.tsx
+// File: backend/src/pages/carriers/CarrierDetailsView.tsx
 import React from 'react';
 import { useParams, useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useQuery } from 'react-query';
@@ -22,7 +22,9 @@ interface ShipmentForCarrierTable {
   origin: { city?: string; state?: string; name?: string; };
   destination: { city?: string; state?: string; name?: string; };
   scheduledPickupDate: string; scheduledDeliveryDate: string;
-  customerRate?: number; modeOfTransport?: string;
+  customerRate?: number;
+  carrierCostTotal?: number; // Added for correct totals
+  modeOfTransport?: string;
 }
 
 
@@ -34,8 +36,9 @@ const CarrierDetailsView: React.FC = () => {
     useQuery(['carrierDetails', carrierId], () => carrierAPI.getById(carrierId!), { enabled: !!carrierId });
   const carrier: CarrierInfo | null = carrierResponse?.data?.data || null;
 
+  // We need to request totalCarrierCost in the fields
   const { data: shipmentsResponse, isLoading: isLoadingShipments, isError: isErrorShipments, error: errorShipmentsData } = 
-    useQuery(['carrierShipmentsList', carrierId], () => shipmentAPI.getAll({ carrier: carrierId, limit: 100, sort: '-scheduledPickupDate' }), { enabled: !!carrierId });
+    useQuery(['carrierShipmentsList', carrierId], () => shipmentAPI.getAll({ carrier: carrierId, limit: 100, sort: '-scheduledPickupDate', select: 'shipmentNumber status origin destination scheduledPickupDate scheduledDeliveryDate carrierCostTotal modeOfTransport' }), { enabled: !!carrierId });
   const shipments: ShipmentForCarrierTable[] = shipmentsResponse?.data?.data?.shipments || [];
 
   const getStatusColor = (status: string | undefined): "default" | "primary"| "secondary" | "warning" | "info" | "success" | "error" => {
@@ -102,12 +105,11 @@ const CarrierDetailsView: React.FC = () => {
                 <TableCell>Destination</TableCell>
                 <TableCell>Pickup</TableCell>
                 <TableCell>Delivery</TableCell>
-                <TableCell align="right">Rate</TableCell>
+                <TableCell align="right">Carrier Cost</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {shipments.map(shipment => (
-                // CORRECTED: Removed component={RouterLink} from TableRow, added Link to specific cell
                 <TableRow hover key={shipment._id} sx={{ '&:hover': { cursor: 'pointer' } }} onClick={() => navigate(`/shipments/${shipment._id}`)}>
                   <TableCell component="th" scope="row">
                     <Link component={RouterLink} to={`/shipments/${shipment._id}`} sx={{ textDecoration: 'none', color: 'inherit' }}>
@@ -120,7 +122,8 @@ const CarrierDetailsView: React.FC = () => {
                   <TableCell>{shipment.destination?.name || `${shipment.destination?.city || 'N/A'}, ${shipment.destination?.state || ''}`}</TableCell>
                   <TableCell>{shipment.scheduledPickupDate ? new Date(shipment.scheduledPickupDate).toLocaleDateString() : 'N/A'}</TableCell>
                   <TableCell>{shipment.scheduledDeliveryDate ? new Date(shipment.scheduledDeliveryDate).toLocaleDateString() : 'N/A'}</TableCell>
-                  <TableCell align="right">${shipment.customerRate?.toLocaleString() || 'N/A'}</TableCell>
+                  {/* --- THIS IS THE FIX --- */}
+                  <TableCell align="right">${(shipment.carrierCostTotal)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -221,11 +221,11 @@ const LaneRatePage: React.FC = () => {
                     </TableCell>
                     <TableCell align="center">{lane.avgFscPercentage !== null ? `${lane.avgFscPercentage?.toFixed(1)}%` : 'N/A'}</TableCell>
                     <TableCell>
-                      {(lane.minChassisCostCarrier !== null && lane.maxChassisCostCarrier !== null) ?
+                      {(lane.minChassisCostCarrier !== null && lane.maxChassisCostCarrier !== null && lane.minChassisCostCarrier !== lane.maxChassisCostCarrier) ?
                        `$${lane.minChassisCostCarrier?.toFixed(2)} - $${lane.maxChassisCostCarrier?.toFixed(2)}` : 
-                       (lane.avgChassisCostCarrier !== null && lane.avgChassisCostCarrier !== undefined ? `Avg: $${lane.avgChassisCostCarrier.toFixed(2)}` : 'N/A')
+                       (lane.avgChassisCostCarrier !== null && lane.avgChassisCostCarrier > 0 ? `Avg: $${lane.avgChassisCostCarrier.toFixed(2)}` : 'N/A')
                       }
-                    </TableCell>
+                  </TableCell>
                     <TableCell>{lane.lastQuotedDate ? format(new Date(lane.lastQuotedDate), 'MM/dd/yyyy') : 'N/A'}</TableCell>
                     <TableCell align="center">
                       <Button size="small" variant="outlined" onClick={() => handleViewLaneDetails(lane)}>

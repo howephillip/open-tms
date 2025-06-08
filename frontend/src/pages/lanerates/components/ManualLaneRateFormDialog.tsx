@@ -136,18 +136,27 @@ const ManualLaneRateFormDialog: React.FC<ManualLaneRateFormDialogProps> = ({
       toast.error('Please fill in all required fields: Origin/Dest City & State, Carrier, Line Haul Cost, Mode, and Rate Date.');
       return;
     }
-    const payload: any = { ...formData };
-    // Ensure numbers are sent as numbers
-    payload.lineHaulCost = parseFloat(formData.lineHaulCost) || 0;
-    if (formData.fscPercentage) payload.fscPercentage = parseFloat(formData.fscPercentage); else delete payload.fscPercentage;
-    if (formData.chassisCostCarrier) payload.chassisCostCarrier = parseFloat(formData.chassisCostCarrier); else delete payload.chassisCostCarrier;
     
-    payload.manualAccessorials = formData.manualAccessorials
-        .filter(acc => acc.name && acc.cost) // Only include if name and cost are present
+    const payload: any = {
+      ...formData,
+      lineHaulCost: parseFloat(formData.lineHaulCost) || 0,
+      manualAccessorials: formData.manualAccessorials
+        .filter(acc => acc.name && acc.cost)
         .map(acc => ({
             ...acc,
             cost: parseFloat(acc.cost) || 0
-        }));
+        }))
+    };
+    
+    const fsc = parseFloat(formData.fscPercentage || '');
+    payload.fscPercentage = !isNaN(fsc) ? fsc : null;
+
+    const chassis = parseFloat(formData.chassisCostCarrier || '');
+    payload.chassisCostCarrier = !isNaN(chassis) ? chassis : null;
+
+    if (!payload.rateValidUntil) {
+      payload.rateValidUntil = null;
+    }
 
     onSubmit(payload);
   };

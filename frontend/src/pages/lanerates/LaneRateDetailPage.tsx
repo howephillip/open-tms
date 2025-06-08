@@ -1,14 +1,14 @@
-// File: frontend/src/pages/lanerates/LaneRateDetailPage.tsx
 import React, { useState } from 'react';
 import {
   Box, Typography, Paper, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, CircularProgress, Alert, IconButton, Tooltip, Chip, Link as MuiLink,
-  TablePagination, Button, List, ListItem, ListItemText
+  TablePagination, Button
 } from '@mui/material';
 import { DeleteOutline as DeleteIcon, ArrowBack as BackIcon, Edit as EditIcon } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useLocation, useNavigate, Link as RouterLink } from 'react-router-dom';
 import { laneRateAPI } from '../../services/api';
+import { toast } from 'react-toastify';
 import ConfirmationDialog from '../../components/common/ConfirmationDialog';
 import ManualLaneRateFormDialog, { ManualLaneRateFormData, initialManualLaneRateFormData } from './components/ManualLaneRateFormDialog';
 import { format } from 'date-fns';
@@ -25,10 +25,11 @@ interface DisplayAccessorial {
 
 interface LaneRateDetailEntry {
   _id: string;
-  carrier: CarrierStub | null; // Allow carrier to be null
+  carrier: CarrierStub | null;
   lineHaulRate?: number;
   lineHaulCost?: number;
   fscPercentage?: number;
+  carrierFscPercentage?: number; // Added for correct edit mapping
   chassisCostCustomer?: number;
   chassisCostCarrier?: number;
   displayAccessorials?: DisplayAccessorial[];
@@ -42,12 +43,6 @@ interface LaneRateDetailEntry {
   equipmentType?: string;
   notes?: string;
   createdBy: UserStub;
-  originCity: string;
-  originState: string;
-  originZip?: string;
-  destinationCity: string;
-  destinationState: string;
-  destinationZip?: string;
   isActive: boolean;
 }
 
@@ -88,29 +83,17 @@ const LaneRateDetailPage: React.FC = () => {
 
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-
   const [isConfirmDeleteDialogOpen, setIsConfirmDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<LaneRateDetailEntry | null>(null);
-
   const [isManualFormOpen, setIsManualFormOpen] = useState(false);
   const [editingManualRateData, setEditingManualRateData] = useState<ManualLaneRateFormData | null>(null);
 
   const queryKeyParams = { originCity, originState, destinationCity, destinationState, originZipParam, destinationZipParam };
 
-  const {
-    data: detailResponse,
-    isLoading,
-    isError,
-    error,
-    isFetching,
-  } = useQuery<{ laneRates: LaneRateDetailEntry[], pagination: { total: number, page: number, limit: number, pages: number } }>(
+  const { data: detailResponse, isLoading, isError, error, isFetching } = useQuery<{ laneRates: LaneRateDetailEntry[], pagination: { total: number, page: number, limit: number, pages: number } }>(
     ['laneRateDetail', queryKeyParams, page, rowsPerPage],
     async () => {
-      const params: any = {
-        originCity, originState, destinationCity, destinationState,
-        page: (page + 1).toString(),
-        limit: rowsPerPage.toString(),
-      };
+      const params: any = { originCity, originState, destinationCity, destinationState, page: (page + 1).toString(), limit: rowsPerPage.toString() };
       if (originZipParam) params.originZip = originZipParam;
       if (destinationZipParam) params.destinationZip = destinationZipParam;
       const response = await laneRateAPI.getLaneRateDetail(params);
@@ -128,93 +111,49 @@ const LaneRateDetailPage: React.FC = () => {
     {
       onSuccess: (response, variables) => {
         toast.success(`Manual lane rate ${variables.id ? 'updated' : 'added'} successfully!`);
-        queryClient.invalidateQueries(['laneRateDetail', queryKeyParams, page, rowsPerPage]);
+        queryClient.invalidateQueries(['laneRateDetail', queryKeyParams]);
         queryClient.invalidateQueries('laneRateSummary');
         setIsManualFormOpen(false);
         setEditingManualRateData(null);
       },
-      onError: (error: any, variables) => {
-        toast.error(error.response?.data?.message || `Failed to ${variables.id ? 'update' : 'add'} manual lane rate.`);
-        console.error("Manual Lane Rate Mutation error:", error.response?.data || error.message, error); // Log the full error
-        setIsManualFormOpen(false);
-        setEditingManualRateData(null); 
+      onError: (error: any) => {
+        toast.error(error.response?.data?.message || `Failed to save manual lane rate.`);
       },
     }
   );
 
-  const deleteMutation = useMutation(
-    (laneRateId: string) => laneRateAPI.deleteLaneRate(laneRateId),
-    {
-      onSuccess: () => {
-        toast.success('Lane rate entry deleted successfully!');
-        queryClient.invalidateQueries(['laneRateDetail', queryKeyParams, page, rowsPerPage]);
-        queryClient.invalidateQueries('laneRateSummary');
-        setIsConfirmDeleteDialogOpen(false);
-        setItemToDelete(null);
-      },
-      onError: (err: any) => {
-        toast.error(err.response?.data?.message || 'Failed to delete lane rate entry.');
-        setIsConfirmDeleteDialogOpen(false);
-        setItemToDelete(null);
-      }
-    }
-  );
+  const deleteMutation = useMutation( (laneRateId: string) => laneRateAPI.deleteLaneRate(laneRateId), {
+      onSuccess: () => { toast.success('Lane rate entry deleted!'); queryClient.invalidateQueries(['laneRateDetail', queryKeyParams]); queryClient.invalidateQueries('laneRateSummary'); setIsConfirmDeleteDialogOpen(false); setItemToDelete(null); },
+      onError: (err: any) => { toast.error(err.response?.data?.message || 'Failed to delete lane rate entry.'); setIsConfirmDeleteDialogOpen(false); setItemToDelete(null); }
+  });
 
-  const handleDeleteClick = (rateEntry: LaneRateDetailEntry) => {
-    setItemToDelete(rateEntry);
-    setIsConfirmDeleteDialogOpen(true);
-  };
-  const handleConfirmDelete = () => {
-    if (itemToDelete) {
-      deleteMutation.mutate(itemToDelete._id);
-    }
-  };
-  const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage);
-  };
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
-  };
+  const handleDeleteClick = (rateEntry: LaneRateDetailEntry) => { setItemToDelete(rateEntry); setIsConfirmDeleteDialogOpen(true); };
+  const handleConfirmDelete = () => { if (itemToDelete) deleteMutation.mutate(itemToDelete._id); };
+  const handleChangePage = (event: unknown, newPage: number) => { setPage(newPage); };
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => { setRowsPerPage(parseInt(event.target.value, 10)); setPage(0); };
 
   const handleOpenManualForm = (rateToEdit?: LaneRateDetailEntry) => {
     if (rateToEdit) {
         const formDataToEdit: ManualLaneRateFormData = {
             _id: rateToEdit._id,
-            originCity: rateToEdit.originCity,
-            originState: rateToEdit.originState,
-            originZip: rateToEdit.originZip || '',
-            destinationCity: rateToEdit.destinationCity,
-            destinationState: rateToEdit.destinationState,
-            destinationZip: rateToEdit.destinationZip || '',
-            carrier: rateToEdit.carrier?._id || '', // Safely access _id, fallback to empty string
+            originCity: rateToEdit.originCity, originState: rateToEdit.originState, originZip: rateToEdit.originZip || '',
+            destinationCity: rateToEdit.destinationCity, destinationState: rateToEdit.destinationState, destinationZip: rateToEdit.destinationZip || '',
+            carrier: rateToEdit.carrier?._id || '',
             lineHaulCost: rateToEdit.lineHaulCost?.toString() || '0',
-            fscPercentage: rateToEdit.fscPercentage?.toString() || '',
-            chassisCostCarrier: rateToEdit.chassisCostCarrier?.toString() || '',
+            fscPercentage: (rateToEdit.carrierFscPercentage ?? '').toString(),
+            chassisCostCarrier: (rateToEdit.chassisCostCarrier ?? '').toString(),
             manualAccessorials: (rateToEdit.displayAccessorials || rateToEdit.manualAccessorials || []).map(acc => ({
-                _id: (acc as any)._id || undefined, // Ensure existing _id is preserved if present
-                name: acc.name,
-                cost: acc.cost.toString(),
-                notes: acc.notes || ''
+                _id: (acc as any)._id || undefined, name: acc.name, cost: acc.cost.toString(), notes: acc.notes || ''
             })),
             rateDate: format(new Date(rateToEdit.rateDate), 'yyyy-MM-dd'),
             rateValidUntil: rateToEdit.rateValidUntil ? format(new Date(rateToEdit.rateValidUntil), 'yyyy-MM-dd') : '',
-            modeOfTransport: rateToEdit.modeOfTransport,
-            equipmentType: rateToEdit.equipmentType || '',
-            notes: rateToEdit.notes || '',
+            modeOfTransport: rateToEdit.modeOfTransport, equipmentType: rateToEdit.equipmentType || '', notes: rateToEdit.notes || '',
         };
         setEditingManualRateData(formDataToEdit);
     } else {
-        // For new entries, prefill with query params if available
-        setEditingManualRateData({
-            ...initialManualLaneRateFormData, // Start with default empty values
-            originCity: originCity || initialManualLaneRateFormData.originCity,
-            originState: originState || initialManualLaneRateFormData.originState,
-            originZip: originZipParam || initialManualLaneRateFormData.originZip,
-            destinationCity: destinationCity || initialManualLaneRateFormData.destinationCity,
-            destinationState: destinationState || initialManualLaneRateFormData.destinationState,
-            destinationZip: destinationZipParam || initialManualLaneRateFormData.destinationZip,
-            // carrier: '', // Ensure carrier is an empty string for new if it's a controlled component
+        setEditingManualRateData({ ...initialManualLaneRateFormData,
+            originCity: originCity || '', originState: originState || '', originZip: originZipParam || '',
+            destinationCity: destinationCity || '', destinationState: destinationState || '', destinationZip: destinationZipParam || '',
         });
     }
     setIsManualFormOpen(true);
@@ -229,99 +168,62 @@ const LaneRateDetailPage: React.FC = () => {
   if (!originCity || !originState || !destinationCity || !destinationState) {
     return (
         <Box sx={{p:3}}>
-            <Button startIcon={<BackIcon />} onClick={() => navigate(-1)} sx={{ mb: 2 }}>
-                Back to Summary
-            </Button>
-            <Alert severity="warning">Missing lane parameters (Origin/Destination City & State) to display details.</Alert>
+            <Button startIcon={<BackIcon />} onClick={() => navigate(-1)} sx={{ mb: 2 }}>Back to Summary</Button>
+            <Alert severity="warning">Missing lane parameters to display details.</Alert>
         </Box>
     );
   }
 
   return (
     <Box sx={{ p: { xs: 1, sm: 2, md: 3 } }}>
-      <Button startIcon={<BackIcon />} onClick={() => navigate(-1)} sx={{ mb: 2 }}>
-        Back to Lane Rate Overview
-      </Button>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Button startIcon={<BackIcon />} onClick={() => navigate(-1)}>Back to Lane Rate Overview</Button>
+        <Button variant="contained" onClick={() => handleOpenManualForm()} startIcon={<EditIcon />}>Add Manual Rate</Button>
+      </Box>
       <Typography variant="h4" gutterBottom>{pageTitle}</Typography>
-      {(originZipParam || destinationZipParam) && (
-        <Typography variant="subtitle1" color="textSecondary" gutterBottom>
-          Filtering by Zip - Origin: {originZipParam || 'Any'} → Destination: {destinationZipParam || 'Any'}
-        </Typography>
-      )}
-       <Button
-        variant="contained"
-        onClick={() => handleOpenManualForm()} // Call without args for new entry
-        sx={{ mb: 2, float: 'right' }}
-        startIcon={<EditIcon />}
-      >
-        Add Manual Rate
-      </Button>
-
-
+      
       {(isLoading || isFetching) && !detailResponse && <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>}
       {isError && <Alert severity="error">Error fetching lane details: {(error as any)?.response?.data?.message || (error as any)?.message || 'Unknown error'}</Alert>}
 
       {!isLoading && !isError && (
         <Paper sx={{ width: '100%', overflow: 'hidden' }} elevation={2}>
           <TableContainer sx={{ maxHeight: 'calc(100vh - 320px)' }}>
-            <Table stickyHeader size="small" aria-label="lane rate detail table">
+            <Table stickyHeader size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{minWidth: 150}}>Carrier</TableCell>
-                  <TableCell sx={{minWidth: 100}}>Date</TableCell>
-                  <TableCell sx={{minWidth: 90}}>Orig Zip</TableCell>
-                  <TableCell sx={{minWidth: 90}}>Dest Zip</TableCell>
-                  <TableCell sx={{minWidth: 120}}>Mode</TableCell>
-                  <TableCell sx={{minWidth: 120}}>Equipment</TableCell>
-                  <TableCell align="right" sx={{minWidth: 100}}>Line Haul (Cost)</TableCell>
-                  <TableCell align="center" sx={{minWidth: 80}}>FSC%</TableCell>
-                  <TableCell align="right" sx={{minWidth: 100}}>Chassis (Cost)</TableCell>
-                  <TableCell sx={{minWidth: 200}}>Accessorials (Carrier Cost)</TableCell>
-                  <TableCell sx={{minWidth: 120}}>Source</TableCell>
-                  <TableCell align="center">Actions</TableCell>
+                  <TableCell>Carrier</TableCell><TableCell>Date</TableCell>
+                  <TableCell>Orig Zip</TableCell><TableCell>Dest Zip</TableCell>
+                  <TableCell>Mode</TableCell><TableCell>Equipment</TableCell>
+                  <TableCell align="right">Line Haul (Cost)</TableCell><TableCell align="center">FSC%</TableCell>
+                  <TableCell align="right">Chassis (Cost)</TableCell><TableCell>Accessorials (Cost)</TableCell>
+                  <TableCell>Source</TableCell><TableCell align="center">Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {laneRateDetails.length === 0 && !isLoading && (
-                  <TableRow><TableCell colSpan={12} align="center">No rate entries found for this specific lane and filters.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={12} align="center">No rate entries found for this lane.</TableCell></TableRow>
                 )}
                 {laneRateDetails.map((rate) => (
                   <TableRow hover key={rate._id}>
-                    <TableCell>
-                        {rate.carrier?.name || 'N/A'}
-                        {rate.carrier?.mcNumber && <Typography variant="caption" display="block">MC: {rate.carrier.mcNumber}</Typography>}
-                    </TableCell>
+                    <TableCell>{rate.carrier?.name || 'N/A'}</TableCell>
                     <TableCell>{format(new Date(rate.rateDate), 'MM/dd/yyyy')}</TableCell>
-                    <TableCell>{rate.originZip || '-'}</TableCell>
-                    <TableCell>{rate.destinationZip || '-'}</TableCell>
+                    <TableCell>{rate.originZip || '-'}</TableCell><TableCell>{rate.destinationZip || '-'}</TableCell>
                     <TableCell sx={{textTransform: 'capitalize'}}>{rate.modeOfTransport.replace(/-/g, ' ')}</TableCell>
                     <TableCell>{rate.equipmentType || '-'}</TableCell>
                     <TableCell align="right">${rate.lineHaulCost?.toFixed(2) || '0.00'}</TableCell>
-                    <TableCell align="center">{rate.fscPercentage !== undefined ? `${rate.fscPercentage.toFixed(1)}%` : '-'}</TableCell>
+                    <TableCell align="center">{rate.carrierFscPercentage !== undefined ? `${rate.carrierFscPercentage.toFixed(1)}%` : '-'}</TableCell>
                     <TableCell align="right">{rate.chassisCostCarrier !== undefined ? `$${rate.chassisCostCarrier.toFixed(2)}` : '-'}</TableCell>
-                    <TableCell>
-                        <AccessorialsDisplay accessorials={rate.displayAccessorials} />
-                    </TableCell>
+                    <TableCell><AccessorialsDisplay accessorials={rate.displayAccessorials} /></TableCell>
                     <TableCell>
                       {rate.sourceShipmentId?._id && rate.sourceType === 'TMS_SHIPMENT' ? (
                         <MuiLink component={RouterLink} to={`/shipments/${rate.sourceShipmentId._id}`}>
                             {rate.sourceQuoteShipmentNumber || rate.sourceShipmentId.shipmentNumber}
                         </MuiLink>
-                      ) : (
-                        rate.sourceQuoteShipmentNumber || rate.sourceType || '-'
-                      )}
+                      ) : ( rate.sourceQuoteShipmentNumber || rate.sourceType || '-' )}
                     </TableCell>
                     <TableCell align="center">
-                        <Tooltip title="Edit Rate">
-                          <IconButton size="small" onClick={() => handleOpenManualForm(rate)}>
-                            <EditIcon fontSize="inherit" />
-                          </IconButton>
-                        </Tooltip>
-                      <Tooltip title="Delete Rate Entry">
-                        <IconButton size="small" onClick={() => handleDeleteClick(rate)} color="error" disabled={deleteMutation.isLoading && itemToDelete?._id === rate._id}>
-                          <DeleteIcon fontSize="inherit" />
-                        </IconButton>
-                      </Tooltip>
+                      <Tooltip title="Edit Rate"><IconButton size="small" onClick={() => handleOpenManualForm(rate)}><EditIcon fontSize="inherit" /></IconButton></Tooltip>
+                      <Tooltip title="Delete Rate"><IconButton size="small" onClick={() => handleDeleteClick(rate)} color="error" disabled={deleteMutation.isLoading}><DeleteIcon fontSize="inherit" /></IconButton></Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -329,38 +231,21 @@ const LaneRateDetailPage: React.FC = () => {
             </Table>
           </TableContainer>
           {paginationData && paginationData.total > 0 && (
-            <TablePagination
-                rowsPerPageOptions={[10, 25, 50, 100]}
-                component="div"
-                count={paginationData.total}
-                rowsPerPage={rowsPerPage}
-                page={page}
-                onPageChange={handleChangePage}
-                onRowsPerPageChange={handleChangeRowsPerPage}
-            />
+            <TablePagination rowsPerPageOptions={[10, 25, 50, 100]} component="div" count={paginationData.total}
+                rowsPerPage={rowsPerPage} page={page} onPageChange={handleChangePage} onRowsPerPageChange={handleChangeRowsPerPage} />
            )}
         </Paper>
       )}
 
       {itemToDelete && (
-        <ConfirmationDialog
-          open={isConfirmDeleteDialogOpen}
-          onClose={() => { setIsConfirmDeleteDialogOpen(false); setItemToDelete(null); }}
-          onConfirm={handleConfirmDelete}
-          title="Delete Lane Rate Entry?"
-          contentText={`Are you sure you want to delete this specific rate entry for ${itemToDelete.originCity}, ${itemToDelete.originState} to ${itemToDelete.destinationCity}, ${itemToDelete.destinationState} by ${itemToDelete.carrier?.name || 'N/A'} dated ${format(new Date(itemToDelete.rateDate), 'MM/dd/yyyy')}? This action cannot be undone.`}
-          isLoading={deleteMutation.isLoading}
-        />
+        <ConfirmationDialog open={isConfirmDeleteDialogOpen} onClose={() => { setIsConfirmDeleteDialogOpen(false); setItemToDelete(null); }} onConfirm={handleConfirmDelete}
+          title="Delete Lane Rate Entry?" contentText={`Are you sure you want to delete this specific rate entry by ${itemToDelete.carrier?.name || 'N/A'}?`}
+          isLoading={deleteMutation.isLoading} />
       )}
 
       {isManualFormOpen && (
-        <ManualLaneRateFormDialog
-            open={isManualFormOpen}
-            onClose={() => {setIsManualFormOpen(false); setEditingManualRateData(null);}}
-            onSubmit={handleSaveManualLaneRate}
-            initialData={editingManualRateData}
-            isLoading={manualRateMutation.isLoading}
-        />
+        <ManualLaneRateFormDialog open={isManualFormOpen} onClose={() => {setIsManualFormOpen(false); setEditingManualRateData(null);}}
+            onSubmit={handleSaveManualLaneRate} initialData={editingManualRateData} isLoading={manualRateMutation.isLoading} />
       )}
     </Box>
   );

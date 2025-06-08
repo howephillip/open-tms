@@ -4,94 +4,104 @@ import { LaneRate, ILaneRate } from '../models/LaneRate';
 import { logger } from '../utils/logger';
 import mongoose from 'mongoose';
 
+// This helper function is no longer needed as we'll handle parsing inline.
+
 export class LaneRateService {
   public async recordLaneRateFromShipment(shipment: IShipment): Promise<ILaneRate | null> {
+    logger.info(`[LaneRateService] Processing shipment ${shipment.shipmentNumber}. Status: ${shipment.status}`);
+
+    // Condition 1: Check status
     if (!['quote', 'booked', 'delivered', 'invoiced', 'paid'].includes(shipment.status)) {
-      logger.info(`Skipping lane rate recording for shipment ${shipment.shipmentNumber} with status ${shipment.status}.`);
+      logger.info(`[LaneRateService] Exiting: Status "${shipment.status}" is not eligible.`);
       return null;
     }
 
-    if (!shipment.carrier) {
-      logger.info(`Skipping lane rate recording for quote/shipment ${shipment.shipmentNumber} as no carrier is assigned.`);
-      return null;
-    }
-
+    // Condition 2: Check for required location data
     if (!shipment.origin?.city || !shipment.origin?.state || !shipment.destination?.city || !shipment.destination?.state) {
-      logger.warn(`Skipping lane rate recording for shipment ${shipment.shipmentNumber} due to missing origin/destination city/state.`);
+      logger.warn(`[LaneRateService] Exiting: Shipment ${shipment.shipmentNumber} is missing location data.`);
       return null;
     }
 
     try {
-      let customerFscPercentage: number | undefined = undefined;
-      if (shipment.fscType === 'percentage' && shipment.fscCustomerAmount != null) {
-        customerFscPercentage = shipment.fscCustomerAmount;
-      } else if (shipment.fscType === 'fixed' && shipment.fscCustomerAmount != null && shipment.customerRate > 0) {
-        customerFscPercentage = (shipment.fscCustomerAmount / shipment.customerRate) * 100;
-      }
-
-      let carrierFscPercentage: number | undefined = undefined;
-      if (shipment.fscType === 'percentage' && shipment.fscCarrierAmount != null) {
-        carrierFscPercentage = shipment.fscCarrierAmount;
-      } else if (shipment.fscType === 'fixed' && shipment.fscCarrierAmount != null && shipment.carrierCostTotal > 0) {
-        carrierFscPercentage = (shipment.fscCarrierAmount / shipment.carrierCostTotal) * 100;
-      }
-
-      let totalAccessorialsCustomerCost = 0;
-      let totalAccessorialsCarrierCost = 0;
-
-      if (shipment.accessorials && shipment.accessorials.length > 0) {
-        shipment.accessorials.forEach((acc) => { // acc is IQuoteAccessorial
-          totalAccessorialsCustomerCost += (acc.customerRate || 0) * (acc.quantity || 1);
-          totalAccessorialsCarrierCost += (acc.carrierCost || 0) * (acc.quantity || 1);
-        });
-      }
-
-      const laneRateData: Partial<ILaneRate> = {
+      // --- Start building the payload safely ---
+      const payload: Partial<ILaneRate> = {
         originCity: shipment.origin.city,
         originState: shipment.origin.state,
-        originZip: shipment.origin.zip,
         destinationCity: shipment.destination.city,
         destinationState: shipment.destination.state,
-        destinationZip: shipment.destination.zip,
-        carrier: shipment.carrier,
-        lineHaulRate: shipment.customerRate,
-        lineHaulCost: shipment.carrierCostTotal,
-        fscPercentage: customerFscPercentage !== undefined ? parseFloat(customerFscPercentage.toFixed(2)) : undefined,
-        carrierFscPercentage: carrierFscPercentage !== undefined ? parseFloat(carrierFscPercentage.toFixed(2)) : undefined,
-        chassisCostCustomer: shipment.chassisCustomerCost,
-        chassisCostCarrier: shipment.chassisCostCarrier,
-        totalAccessorialsCustomer: totalAccessorialsCustomerCost,
-        totalAccessorialsCarrier: totalAccessorialsCarrierCost,
         sourceType: 'TMS_SHIPMENT',
         sourceShipmentId: shipment._id,
         sourceQuoteShipmentNumber: shipment.shipmentNumber,
-        rateDate: shipment.createdAt,
+        rateDate: shipment.createdAt || new Date(),
         modeOfTransport: shipment.modeOfTransport,
-        equipmentType: shipment.equipmentType,
-        notes: shipment.status === 'quote' ? shipment.quoteNotes : shipment.internalNotes,
         createdBy: shipment.createdBy,
         isActive: true,
       };
 
+      // --- Assign values only if they are valid numbers or non-empty strings ---
+      // For optional numeric fields, we parse them. If they are invalid, we don't add them to the payload.
+      const lineHaulRate = parseFloat(String(shipment.customerRate));
+      if (!isNaN(lineHaulRate)) payload.lineHaulRate = lineHaulRate;
+      
+      const lineHaulCost = parseFloat(String(shipment.carrierCostTotal));
+      if (!isNaN(lineHaulCost)) payload.lineHaulCost = lineHaulCost; else {
+        logger.warn(`[LaneRateService] Exiting: carrierCostTotal is invalid for ${shipment.shipmentNumber}`);
+        return null; // lineHaulCost is required, so we must exit if it's invalid.
+      }
+      
+      const fscCustomerAmount = parseFloat(String(shipment.fscCustomerAmount));
+      if (!isNaN(fscCustomerAmount) && shipment.fscType === 'percentage') {
+          payload.fscPercentage = fscCustomerAmount;
+      } else if (!isNaN(fscCustomerAmount) && shipment.fscType === 'fixed' && payload.lineHaulRate && payload.lineHaulRate > 0) {
+          payload.fscPercentage = (fscCustomerAmount / payload.lineHaulRate) * 100;
+      }
+      
+      const fscCarrierAmount = parseFloat(String(shipment.fscCarrierAmount));
+      if (!isNaN(fscCarrierAmount) && shipment.fscType === 'percentage') {
+          payload.carrierFscPercentage = fscCarrierAmount;
+      } else if (!isNaN(fscCarrierAmount) && shipment.fscType === 'fixed' && payload.lineHaulCost > 0) {
+          payload.carrierFscPercentage = (fscCarrierAmount / payload.lineHaulCost) * 100;
+      }
+      
+      const chassisCustomerCost = parseFloat(String(shipment.chassisCustomerCost));
+      if (!isNaN(chassisCustomerCost)) payload.chassisCostCustomer = chassisCustomerCost;
+
+      const chassisCarrierCost = parseFloat(String(shipment.chassisCarrierCost));
+      if (!isNaN(chassisCarrierCost)) payload.chassisCostCarrier = chassisCarrierCost;
+
+      // Assign optional string/ID fields
+      if (shipment.origin.zip) payload.originZip = shipment.origin.zip;
+      if (shipment.destination.zip) payload.destinationZip = shipment.destination.zip;
+      if (shipment.carrier) payload.carrier = shipment.carrier;
+      if (shipment.equipmentType) payload.equipmentType = shipment.equipmentType;
+      if (shipment.status === 'quote' && shipment.quoteNotes) payload.notes = shipment.quoteNotes;
+      if (shipment.status !== 'quote' && shipment.internalNotes) payload.notes = shipment.internalNotes;
+
+      logger.info(`[LaneRateService] Constructed final payload for ${shipment.shipmentNumber}:`, JSON.stringify(payload, null, 2));
+
+      // Find and update or create
       const existingLaneRate = await LaneRate.findOne({ sourceShipmentId: shipment._id });
 
       if (existingLaneRate) {
-        Object.assign(existingLaneRate, laneRateData);
-        if (shipment.updatedBy) {
-            existingLaneRate.updatedBy = shipment.updatedBy;
-        }
+        logger.info(`[LaneRateService] Updating existing lane rate (${existingLaneRate._id})...`);
+        if (shipment.updatedBy) payload.updatedBy = shipment.updatedBy;
+        
+        Object.assign(existingLaneRate, payload);
         await existingLaneRate.save();
-        logger.info(`Updated lane rate from shipment ${shipment.shipmentNumber}. LaneRate ID: ${existingLaneRate._id}`);
+        
+        logger.info(`[LaneRateService] Updated lane rate ID: ${existingLaneRate._id}`);
         return existingLaneRate;
       } else {
-        const newLaneRate = new LaneRate(laneRateData);
+        logger.info(`[LaneRateService] Creating new lane rate...`);
+        const newLaneRate = new LaneRate(payload);
         await newLaneRate.save();
-        logger.info(`Recorded new lane rate from shipment ${shipment.shipmentNumber}. LaneRate ID: ${newLaneRate._id}`);
+        
+        logger.info(`[LaneRateService] Created new lane rate ID: ${newLaneRate._id}`);
         return newLaneRate;
       }
 
     } catch (error: any) {
-      logger.error(`Error recording/updating lane rate for shipment ${shipment.shipmentNumber}:`, {
+      logger.error(`[LaneRateService] CRITICAL ERROR for shipment ${shipment.shipmentNumber}:`, {
         message: error.message,
         stack: error.stack,
       });

@@ -10,7 +10,7 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditIcon from '@mui/icons-material/Edit';
 
-// Interfaces (Ensure these match your backend IShipper and simplified IShipment)
+// Interfaces
 interface ShipperDetails {
   _id: string; name: string; industry?: string;
   address?: { street?: string; city?: string; state?: string; zip?: string; };
@@ -18,12 +18,14 @@ interface ShipperDetails {
   billingInfo?: { paymentTerms?: string; creditLimit?: number; invoiceEmail?: string; };
   preferredEquipment?: string[];
   totalShipments?: number; totalRevenue?: number; averageMargin?: number;
-  // documents?: any[]; // If you populate documents for shippers
 }
 interface ShipmentForShipperTable {
   _id: string; shipmentNumber: string; status: string;
   destination: { city?: string; state?: string; name?: string; };
-  scheduledDeliveryDate: string; customerRate?: number; modeOfTransport?: string;
+  scheduledDeliveryDate: string; 
+  customerRate?: number; 
+  totalCustomerRate?: number; // Added for correct totals
+  modeOfTransport?: string;
 }
 
 
@@ -35,14 +37,15 @@ const ShipperDetailsView: React.FC = () => {
     useQuery(['shipperDetails', shipperId], () => shipperAPI.getById(shipperId!), { enabled: !!shipperId });
   const shipper: ShipperDetails | null = shipperResponse?.data?.data || null;
 
+  // We need to request totalCustomerRate in the fields
   const { data: shipmentsResponse, isLoading: isLoadingShipments, isError: isErrorShipments, error: errorShipmentsData } = 
-    useQuery(['shipperShipmentsList', shipperId], () => shipmentAPI.getAll({ shipper: shipperId, limit: 100, sort: '-scheduledPickupDate' }), { enabled: !!shipperId });
+    useQuery(['shipperShipmentsList', shipperId], () => shipmentAPI.getAll({ shipper: shipperId, limit: 100, sort: '-scheduledPickupDate', select: 'shipmentNumber status destination scheduledDeliveryDate customerRate totalCustomerRate modeOfTransport' }), { enabled: !!shipperId });
   const shipments: ShipmentForShipperTable[] = shipmentsResponse?.data?.data?.shipments || [];
 
   const getStatusColor = (status: string | undefined): "default" | "primary"| "secondary" | "warning" | "info" | "success" | "error" => {
     switch (status?.toLowerCase().replace(/_/g, ' ')) {
       case 'quote': return 'default'; case 'pending': return 'warning';
-      case 'booked': case 'dispatched': case 'at pickup': /* ... more ... */ return 'info';
+      case 'booked': case 'dispatched': case 'at pickup': return 'info';
       case 'picked up': case 'delivered': case 'pod received': return 'success';
       case 'invoiced': return 'primary'; case 'paid': return 'secondary';
       case 'cancelled': case 'on hold': case 'problem': return 'error';
@@ -62,7 +65,6 @@ const ShipperDetailsView: React.FC = () => {
       <Paper sx={{ p: { xs: 1.5, sm: 2, md: 3 }, mb: 3 }}>
         <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={1}>
             <Typography variant="h4" component="h1" gutterBottom>{shipper.name}</Typography>
-            {/* TODO: Add Edit Shipper button that navigates to an edit route for shippers, similar to shipments */}
             {/* <Button variant="outlined" size="small" startIcon={<EditIcon />} onClick={() => navigate(`/shippers/edit/${shipper._id}`)}>Edit Shipper</Button> */}
         </Box>
         <Typography variant="subtitle1" color="textSecondary" gutterBottom>Industry: {shipper.industry || 'N/A'}</Typography>
@@ -105,7 +107,7 @@ const ShipperDetailsView: React.FC = () => {
             <TableHead><TableRow>
                 <TableCell>Shipment #</TableCell><TableCell>Status</TableCell>
                 <TableCell>Mode</TableCell><TableCell>Destination</TableCell>
-                <TableCell>Delivery Date</TableCell><TableCell align="right">Rate</TableCell>
+                <TableCell>Delivery Date</TableCell><TableCell align="right">Total Rate</TableCell>
             </TableRow></TableHead>
             <TableBody>
               {shipments.map(shipment => (
@@ -115,7 +117,8 @@ const ShipperDetailsView: React.FC = () => {
                   <TableCell sx={{textTransform:'capitalize'}}>{shipment.modeOfTransport?.replace(/-/g,' ') || 'N/A'}</TableCell>
                   <TableCell>{shipment.destination?.name || `${shipment.destination?.city || 'N/A'}, ${shipment.destination?.state || ''}`}</TableCell>
                   <TableCell>{new Date(shipment.scheduledDeliveryDate).toLocaleDateString()}</TableCell>
-                  <TableCell align="right">${shipment.customerRate?.toLocaleString() || 'N/A'}</TableCell>
+                  {/* --- THIS IS THE FIX --- */}
+                  <TableCell align="right">${(shipment.totalCustomerRate ?? shipment.customerRate)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

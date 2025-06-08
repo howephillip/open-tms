@@ -10,8 +10,10 @@ import { Document as DocModel } from '../models/Document';
 import { ApplicationSettings, IQuoteFormSettings } from '../models/ApplicationSettings';
 import { AIEmailService } from '../services/ai/emailService';
 import { logger } from '../utils/logger';
+import { LaneRateService } from '../services/laneRateService';
 
 let aiEmailServiceInstance: AIEmailService | null = null;
+const laneRateService = new LaneRateService();
 
 function getAIEmailService(): AIEmailService {
   if (!aiEmailServiceInstance) {
@@ -357,43 +359,37 @@ export class ShipmentController {
         
         const updateData = req.body;
         
-        // --- CORRECTED MERGE LOGIC ---
-        // Start with the original document, then carefully apply updates.
-        const finalState = { ...originalDoc };
-
-        for (const key in updateData) {
-            if (Object.prototype.hasOwnProperty.call(updateData, key)) {
-                // This will overwrite originalDoc fields with what came from the frontend.
-                // If a field was empty on the form (like fscType), it will be `""` here.
-                (finalState as any)[key] = updateData[key];
-            }
-        }
+        // Create a representation of the final document state by merging original with updates.
+        const finalState = { ...originalDoc, ...updateData };
         
-        // --- Start Financial Calculations on the merged `finalState` ---
+        // Explicitly parse all numeric fields from the final state representation
         const lineHaulCustomer = parseFloat(String(finalState.customerRate)) || 0;
         const lineHaulCarrier = parseFloat(String(finalState.carrierCostTotal)) || 0;
         
+        const fscCustomerAmount = parseFloat(String(finalState.fscCustomerAmount)) || 0;
+        const fscCarrierAmount = parseFloat(String(finalState.fscCarrierAmount)) || 0;
+        const chassisCustomerCost = parseFloat(String(finalState.chassisCustomerCost)) || 0;
+        const chassisCarrierCost = parseFloat(String(finalState.chassisCarrierCost)) || 0;
+
+        // --- Start Financial Calculations ---
         let fscCustomerValue = 0;
-        if (finalState.fscType === 'percentage' && finalState.fscCustomerAmount) {
-            fscCustomerValue = lineHaulCustomer * (parseFloat(String(finalState.fscCustomerAmount)) / 100);
-        } else if (finalState.fscType === 'fixed' && finalState.fscCustomerAmount) {
-            fscCustomerValue = parseFloat(String(finalState.fscCustomerAmount));
+        if (finalState.fscType === 'percentage' && fscCustomerAmount) {
+            fscCustomerValue = lineHaulCustomer * (fscCustomerAmount / 100);
+        } else if (finalState.fscType === 'fixed' && fscCustomerAmount) {
+            fscCustomerValue = fscCustomerAmount;
         }
 
         let fscCarrierValue = 0;
-        if (finalState.fscType === 'percentage' && finalState.fscCarrierAmount) {
-            fscCarrierValue = lineHaulCarrier * (parseFloat(String(finalState.fscCarrierAmount)) / 100);
-        } else if (finalState.fscType === 'fixed' && finalState.fscCarrierAmount) {
-            fscCarrierValue = parseFloat(String(finalState.fscCarrierAmount));
+        if (finalState.fscType === 'percentage' && fscCarrierAmount) {
+            fscCarrierValue = lineHaulCarrier * (fscCarrierAmount / 100);
+        } else if (finalState.fscType === 'fixed' && fscCarrierAmount) {
+            fscCarrierValue = fscCarrierAmount;
         }
-
-        const chassisCustomerCost = parseFloat(String(finalState.chassisCustomerCost)) || 0;
-        const chassisCarrierCost = parseFloat(String(finalState.chassisCarrierCost)) || 0;
 
         let totalAccessorialsCustomerCost = 0;
         let totalAccessorialsCarrierCost = 0;
         
-        const accessorials = finalState.accessorials;
+        const accessorials = updateData.accessorials || originalDoc.accessorials;
         if (Array.isArray(accessorials)) {
             accessorials.forEach((acc: any) => {
                 totalAccessorialsCustomerCost += (parseFloat(String(acc.customerRate)) || 0) * (parseFloat(String(acc.quantity)) || 1);
@@ -406,9 +402,17 @@ export class ShipmentController {
         const grossProfit = totalCustomerRate - totalCarrierCost;
         const margin = totalCustomerRate > 0 ? (grossProfit / totalCustomerRate) * 100 : 0;
         
-        // --- Build the final update payload, including calculated fields ---
+        // --- Build the final, type-corrected update payload ---
         const updatePayload: Record<string, any> = {
             ...updateData,
+            // Overwrite with correctly typed numbers
+            customerRate: lineHaulCustomer,
+            carrierCostTotal: lineHaulCarrier,
+            fscCustomerAmount: fscCustomerAmount,
+            fscCarrierAmount: fscCarrierAmount,
+            chassisCustomerCost: chassisCustomerCost,
+            chassisCarrierCost: chassisCarrierCost,
+            // Add calculated fields
             totalCustomerRate,
             totalCarrierCost,
             grossProfit,
@@ -424,18 +428,34 @@ export class ShipmentController {
             id,
             { $set: updatePayload }, 
             { new: true, runValidators: true, context: 'query' }
-        )
-        .populate([
+        );
+
+        if (!updatedShipment) {
+            // This check is redundant if the one above is hit, but good practice.
+            logger.error(`Shipment with ID ${id} not found after update attempt.`);
+            return res.status(404).json({ success: false, message: 'Shipment not found' });
+        }
+        
+        // --- START OF NEW CODE ---
+        // Asynchronously record the lane rate after successfully updating the shipment.
+        // We use the fully updated document for this process.
+        laneRateService.recordLaneRateFromShipment(updatedShipment).catch(err => {
+          logger.error(`Failed to record lane rate in the background for updated shipment ${updatedShipment.shipmentNumber}`, { error: err.message });
+        });
+        // --- END OF NEW CODE ---
+        
+        logger.info('Shipment update successful and persisted to DB.', { shipmentId: updatedShipment._id });
+        
+        const populatedShipment = await updatedShipment.populate([
             { path: 'shipper', select: 'name' },
             { path: 'carrier', select: 'name' },
             { path: 'createdBy', select: 'firstName lastName email'},
             { path: 'updatedBy', select: 'firstName lastName email'},
             { path: 'documents', select: 'originalName _id mimetype size createdAt path'},
             { path: 'accessorials.accessorialTypeId', model: 'AccessorialType', select: 'name code unitName' }
-        ]).lean();
+        ]);
 
-        logger.info('Shipment update successful and persisted to DB.', { shipmentId: updatedShipment?._id });
-        res.status(200).json({ success: true, data: updatedShipment, message: 'Shipment updated successfully' });
+        res.status(200).json({ success: true, data: populatedShipment.toObject(), message: 'Shipment updated successfully' });
 
     } catch (error: any) {
         logger.error(`CRITICAL ERROR in updateShipment (ID: ${id}):`, { message: error.message, stack: error.stack });

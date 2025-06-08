@@ -1,8 +1,7 @@
-// File: backend/src/models/LaneRate.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IManualAccessorial extends Document {
-  _id: mongoose.Types.ObjectId; // Ensure _id is typed correctly
+  _id: mongoose.Types.ObjectId;
   name: string;
   cost: number;
   notes?: string;
@@ -21,7 +20,7 @@ export interface ILaneRate extends Document {
   destinationCity: string;
   destinationState: string;
   destinationZip?: string;
-  carrier: mongoose.Types.ObjectId;
+  carrier?: mongoose.Types.ObjectId; // Changed to optional
   lineHaulRate?: number;
   lineHaulCost: number;
   fscPercentage?: number;
@@ -40,7 +39,7 @@ export interface ILaneRate extends Document {
   equipmentType?: string;
   notes?: string;
   createdBy: mongoose.Types.ObjectId;
-  updatedBy?: mongoose.Types.ObjectId; // Added for consistency
+  updatedBy?: mongoose.Types.ObjectId;
   isActive: boolean;
   createdAt?: Date;
   updatedAt?: Date;
@@ -53,8 +52,9 @@ const laneRateSchema = new Schema<ILaneRate>({
   destinationCity: { type: String, required: true, trim: true, index: true },
   destinationState: { type: String, required: true, trim: true, index: true },
   destinationZip: { type: String, trim: true, sparse: true },
-  carrier: { type: Schema.Types.ObjectId, ref: 'Carrier', required: true, index: true },
-  lineHaulRate: { type: Number }, // Optional if not explicitly required
+  // --- THE FIX: `required` is now false ---
+  carrier: { type: Schema.Types.ObjectId, ref: 'Carrier', required: false, index: true },
+  lineHaulRate: { type: Number },
   lineHaulCost: { type: Number, required: true },
   fscPercentage: { type: Number },
   carrierFscPercentage: { type: Number },
@@ -72,7 +72,7 @@ const laneRateSchema = new Schema<ILaneRate>({
   equipmentType: { type: String, trim: true, index: true },
   notes: { type: String, trim: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-  updatedBy: { type: Schema.Types.ObjectId, ref: 'User' }, // Added
+  updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   isActive: { type: Boolean, default: true, index: true },
 }, {
   timestamps: true,

@@ -13,7 +13,7 @@ import {
   IconButton,
   useTheme,
   useMediaQuery,
-  Divider, // Import Divider
+  Divider,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -25,13 +25,16 @@ import {
   Description as DocumentIcon,
   Settings as SettingsIcon,
   PriceCheck as LaneRateIcon,
+  RequestQuote as QuoteIcon, // Import the Quote icon
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const drawerWidth = 240;
 
+// --- UPDATED MENU ITEMS ---
 const menuItems = [
-  { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' }, // Changed path to /dashboard for consistency
+  { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
+  { text: 'Quotes', icon: <QuoteIcon />, path: '/quotes' }, // Added Quotes
   { text: 'Shipments', icon: <ShipmentIcon />, path: '/shipments' },
   { text: 'Carriers', icon: <CarrierIcon />, path: '/carriers' },
   { text: 'Shippers', icon: <ShipperIcon />, path: '/shippers' },
@@ -40,7 +43,6 @@ const menuItems = [
   { text: 'Documents', icon: <DocumentIcon />, path: '/documents' },
 ];
 
-// Add settings item separately or at the end
 const settingsMenuItem = { text: 'Settings', icon: <SettingsIcon />, path: '/settings' };
 
 interface LayoutProps {
@@ -60,30 +62,30 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
   const drawer = (
     <div>
-      <Toolbar sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '64px' /* Match AppBar height */ }}>
+      <Toolbar sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '64px' }}>
         <Typography variant="h6" noWrap component="div">
           OpenSource TMS
         </Typography>
       </Toolbar>
-      <Divider /> {/* Add a divider after the toolbar */}
+      <Divider />
       <List>
         {menuItems.map((item) => (
           <ListItem
-            button // listItem deprecated, use ListItemButton if MUI v5+
+            button
             key={item.text}
             onClick={() => {
                 navigate(item.path);
-                if(isMobile) handleDrawerToggle(); // Close drawer on mobile after navigation
+                if(isMobile) handleDrawerToggle();
             }}
-            selected={location.pathname.startsWith(item.path) && (item.path !== '/' || location.pathname === '/')} // Improved selected logic for nested routes
+            selected={location.pathname.startsWith(item.path)} // Simplified selected logic
           >
             <ListItemIcon>{item.icon}</ListItemIcon>
             <ListItemText primary={item.text} />
           </ListItem>
         ))}
       </List>
-      <Divider /> {/* Divider before settings or other bottom items */}
-      <List> {/* Separate list for settings or bottom items */}
+      <Divider />
+      <List>
         <ListItem
             button
             key={settingsMenuItem.text}
@@ -105,9 +107,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       <AppBar
         position="fixed"
         sx={{
-          zIndex: theme.zIndex.drawer + 1, // Ensure AppBar is above Drawer
-          // width: { sm: `calc(100% - ${drawerWidth}px)` }, // Only apply if drawer is permanent
-          // ml: { sm: `${drawerWidth}px` }, // Only apply if drawer is permanent
+          zIndex: theme.zIndex.drawer + 1,
         }}
       >
         <Toolbar>
@@ -116,12 +116,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' } }} // Only show menu icon on small screens
+            sx={{ mr: 2, display: { sm: 'none' } }}
           >
             <MenuIcon />
           </IconButton>
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {/* You can dynamically set this title based on the page */}
             OpenSource TMS
           </Typography>
         </Toolbar>
@@ -136,7 +135,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           open={mobileOpen}
           onClose={handleDrawerToggle}
           ModalProps={{
-            keepMounted: true, // Better open performance on mobile.
+            keepMounted: true,
           }}
           sx={{
             display: { xs: 'block', sm: 'none' },
@@ -161,11 +160,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
         sx={{
           flexGrow: 1,
           p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` }, // Adjust main content width for permanent drawer
-          marginLeft: { sm: `${drawerWidth}px` } // Ensure main content doesn't overlap with permanent drawer
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          marginLeft: { sm: `${drawerWidth}px` }
         }}
       >
-        <Toolbar /> {/* This is important to offset content below AppBar */}
+        <Toolbar />
         {children}
       </Box>
     </Box>
