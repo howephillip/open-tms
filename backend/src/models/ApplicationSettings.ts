@@ -1,31 +1,33 @@
-// File: backend/src/models/ApplicationSettings.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 // Interface for specific Quote Form settings
 export interface IQuoteFormSettings {
-  requiredFields: string[]; // Array of field IDs that are required
+  requiredFields: string[];
   quoteNumberPrefix: string;
   quoteNumberNextSequence: number;
-  // Add other quote-specific settings here
+}
+
+// --- NEW: Interface for Shipment Form settings ---
+export interface IShipmentFormSettings {
+  requiredFields: string[];
 }
 
 // General Application Settings Interface
 export interface IApplicationSettings extends Document {
-  key: string; // e.g., 'quoteForm', 'globalDefaults', 'userPermissionsConfig'
-  settings: IQuoteFormSettings | Record<string, any>; // Flexible settings object
+  key: string;
+  settings: IQuoteFormSettings | IShipmentFormSettings | Record<string, any>; // Updated to include new type
   lastUpdatedBy?: mongoose.Types.ObjectId;
-  // createdAt and updatedAt will be added by timestamps
 }
 
 const applicationSettingsSchema = new Schema<IApplicationSettings>({
   key: {
     type: String,
     required: true,
-    unique: true, // Ensure only one document per key
+    unique: true,
     index: true,
   },
   settings: {
-    type: Schema.Types.Mixed, // Allows for flexible settings structure
+    type: Schema.Types.Mixed,
     required: true,
   },
   lastUpdatedBy: {

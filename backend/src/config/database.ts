@@ -1,5 +1,6 @@
-import dotenv from 'dotenv';
-dotenv.config();
+// We no longer need dotenv here as it's handled in index.ts
+// import dotenv from 'dotenv';
+// dotenv.config();
 
 export const config = {
   mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/opensource-tms',
@@ -15,5 +16,9 @@ export const config = {
     }
   },
   openaiApiKey: process.env.OPENAI_API_KEY || '',
-  saferApiKey: process.env.SAFER_API_KEY || ''
+  saferApiKey: process.env.SAFER_API_KEY || '',
+  awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+  awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  awsRegion: process.env.AWS_REGION || '',
+  s3BucketName: process.env.S3_BUCKET_NAME || '',
 };

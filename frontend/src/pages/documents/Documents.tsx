@@ -12,19 +12,19 @@ import { toast } from 'react-toastify';
 
 interface DocumentFile {
   _id: string;
-  filename: string;
   originalName: string;
   mimetype: string;
   size: number;
-  path: string; // Path on server for download/view
+  s3Key: string; // Changed from path
+  s3Location: string; // The full URL
   relatedTo?: {
     type: 'shipment' | 'carrier' | 'shipper' | 'general';
-    id?: string; // This would be the _id of the related entity
-    displayValue?: string; // e.g., Shipment Number or Carrier Name
+    id?: string;
+    displayValue?: string;
   };
-  uploadedBy?: { _id: string, email: string }; // Assuming user info
+  uploadedBy?: { _id: string, email: string };
   tags?: string[];
-  createdAt: string; // Date string
+  createdAt: string;
 }
 
 interface UploadFormData {

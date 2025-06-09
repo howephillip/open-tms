@@ -1,4 +1,7 @@
 // File: backend/src/index.ts
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
@@ -28,9 +31,10 @@ import { financialRoutes } from './routes/financials';
 import { documentRoutes } from './routes/documents';
 import { dashboardRoutes } from './routes/dashboard';
 import { lookupRoutes } from './routes/lookupRoutes';
-import { settingsRoutes } from './routes/settings'; // Assuming this exists
-import { laneRateRoutes } from './routes/laneRates'; // Assuming this exists
-import { accessorialTypeRoutes } from './routes/accessorialTypes'; // Assuming this exists
+import { settingsRoutes } from './routes/settings';
+import { laneRateRoutes } from './routes/laneRates';
+import { accessorialTypeRoutes } from './routes/accessorialTypes';
+import { equipmentTypeRoutes } from './routes/equipmentTypes'; 
 // --- END OF ROUTE IMPORTS ---
 
 
@@ -57,6 +61,7 @@ app.use('/api/lookups', lookupRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/lanerates', laneRateRoutes);
 app.use('/api/accessorial-types', accessorialTypeRoutes);
+app.use('/api/equipment-types', equipmentTypeRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({

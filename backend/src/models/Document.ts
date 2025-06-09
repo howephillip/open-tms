@@ -1,11 +1,12 @@
-import mongoose, { Schema, Document as MongooseDocument } from 'mongoose'; // <--- ALIASED HERE
+import mongoose, { Schema, Document as MongooseDocument } from 'mongoose';
 
-export interface IDocument extends MongooseDocument { // <--- USE THE ALIAS
-  filename: string;
+export interface IDocument extends MongooseDocument {
+  filename: string; // The S3 object key
   originalName: string;
   mimetype: string;
   size: number;
-  path: string;
+  s3Key: string; // Replaces 'path'
+  s3Location: string; // The full S3 URL
   tags: string[];
   relatedTo: {
     type: 'shipment' | 'carrier' | 'shipper' | 'general';
@@ -21,7 +22,8 @@ const documentSchema = new Schema<IDocument>({
   originalName: { type: String, required: true },
   mimetype: { type: String, required: true },
   size: { type: Number, required: true },
-  path: { type: String, required: true },
+  s3Key: { type: String, required: true }, // Changed from path
+  s3Location: { type: String, required: true },
   tags: [String],
   relatedTo: {
     type: { type: String, enum: ['shipment', 'carrier', 'shipper', 'general'], required: true },
@@ -32,5 +34,4 @@ const documentSchema = new Schema<IDocument>({
   timestamps: true
 });
 
-// This is your model, no need to change the name here
 export const Document = mongoose.model<IDocument>('Document', documentSchema);

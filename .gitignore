@@ -29,5 +29,7 @@ mongo_dump_local/
 # Ignore .env
 .env
 
-# Ignore my python script
+# Ignore my python scripts
 source_code.py
+code_to_md.py
+source_extract.md

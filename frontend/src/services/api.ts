@@ -1,4 +1,3 @@
-// File: frontend/src/services/api.ts
 import axios from 'axios';
 
 const VITE_API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
@@ -91,18 +90,15 @@ export const lookupAPI = {
   getAccessorialTypes: (params?: any) => api.get('/lookups/accessorial-types', { params }),
   getModeOfTransportOptions: () => api.get('/lookups/modes-of-transport'),
   getStatusOptions: () => api.get('/lookups/status-options'),
-};
+}; // <<<--- THIS WAS THE MISSING COMMA
 
 // --- Settings API ---
 export const settingsAPI = {
-  getQuoteFormSettings: () => api.get('/settings/quoteform'), // Ensure backend route is /api/settings/quoteform
+  getQuoteFormSettings: () => api.get('/settings/quoteform'),
   updateQuoteFormSettings: (data: any) => api.put('/settings/quoteform', data),
-  // Add other specific settings endpoints here if needed
-  // Example for generic, but specific is often better:
-  // getSettings: (path: string) => api.get(`/settings${path}`),
-  // updateSettings: (path: string, data: any) => api.put(`/settings${path}`, data),
+  getShipmentFormSettings: () => api.get('/settings/shipmentform'),
+  updateShipmentFormSettings: (data: any) => api.put('/settings/shipmentform', data),
 };
-// --- End Settings API ---
 
 export const laneRateAPI = {
   getLaneRateSummary: (params?: any) => api.get('/lanerates/summary', { params }),
@@ -119,6 +115,15 @@ export const accessorialTypeAPI = {
   create: (data: any) => api.post('/accessorial-types', data),
   update: (id: string, data: any) => api.put(`/accessorial-types/${id}`, data),
   delete: (id: string) => api.delete(`/accessorial-types/${id}`),
+};
+
+// --- THIS IS THE NEW API OBJECT FOR EQUIPMENT TYPES ---
+export const equipmentTypeAPI = {
+  getAll: (params?: any) => api.get('/equipment-types', { params }),
+  create: (data: any) => api.post('/equipment-types', data),
+  update: (id: string, data: any) => api.put(`/equipment-types/${id}`, data),
+  delete: (id: string) => api.delete(`/equipment-types/${id}`),
+  getById: (id: string) => api.get(`/equipment-types/${id}`),
 };
 
 export default api;
