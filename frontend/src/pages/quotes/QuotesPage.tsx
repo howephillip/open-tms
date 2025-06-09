@@ -87,6 +87,12 @@ const QuotesPage: React.FC = () => {
     // The create/update logic is complex and best handled by a shared utility or service
     // For now, we construct a basic payload knowing it's a quote.
     const apiPayload = { ...formDataFromDialog, status: 'quote' };
+    if (apiPayload.shipper === '') {
+      delete (apiPayload as any).shipper;
+    }
+    if (apiPayload.carrier === '') {
+      delete (apiPayload as any).carrier;
+    }
     quoteMutation.mutate({ id: idToUpdate || formDataFromDialog._id, formData: apiPayload });
   };
   
