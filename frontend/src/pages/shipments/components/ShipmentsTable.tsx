@@ -11,13 +11,13 @@ import {
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 
-interface ShipperCarrierStub { _id: string; name?: string; }
+// Updated interface to expect the full objects
 interface ShipmentRowData {
   _id: string;
   shipmentNumber?: string;
   modeOfTransport?: string;
-  shipper?: ShipperCarrierStub | string | null;
-  carrier?: ShipperCarrierStub | string | null;
+  shipper?: { _id: string; name?: string; } | string | null;
+  carrier?: { _id: string; name?: string; } | string | null;
   origin?: { city?: string; state?: string; };
   destination?: { city?: string; state?: string; };
   status?: string;
@@ -26,7 +26,7 @@ interface ShipmentRowData {
   containerNumber?: string;
   proNumber?: string;
   customerRate?: number;
-  totalCustomerRate?: number; // Added this field to the interface
+  totalCustomerRate?: number;
 }
 
 interface ShipmentsTableProps {
@@ -38,7 +38,7 @@ interface ShipmentsTableProps {
   onAddCheckIn: (item: ShipmentRowData) => void;
   onGenerateEmail: (item: ShipmentRowData) => void;
   onDeleteItem: (item: ShipmentRowData) => void;
-  getDisplayName: (entity: ShipperCarrierStub | string | null | undefined) => string;
+  getDisplayName: (entity: any) => string;
   getStatusColor: (status: string | undefined) => "default" | "primary" | "secondary" | "warning" | "info" | "success" | "error";
 }
 
@@ -73,29 +73,25 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
             items.map((item) => (
               <TableRow hover key={item._id}>
                 <TableCell>
-                  <MuiLink
-                      component={RouterLink}
-                      to={`/shipments/${item._id}`}
-                      sx={{ textDecoration: 'none', color: 'primary.main', '&:hover': {textDecoration: 'underline'} }}
-                  >
+                  <MuiLink component={RouterLink} to={`/shipments/${item._id}`} sx={{ textDecoration: 'none', color: 'primary.main', '&:hover': {textDecoration: 'underline'} }}>
                       {item.shipmentNumber || 'N/A'}
                   </MuiLink>
                 </TableCell>
                 <TableCell sx={{textTransform: 'capitalize'}}>{item.modeOfTransport?.replace(/-/g, ' ') || 'N/A'}</TableCell>
                 <TableCell>{getDisplayName(item.shipper)}</TableCell>
                 <TableCell>{getDisplayName(item.carrier)}</TableCell>
-                <TableCell>{item.origin?.city || 'N/A'} → {item.destination?.city || 'N/A'}</TableCell>
+
+                {/* --- THIS IS THE FIX --- */}
+                <TableCell>{`${item.origin?.city || 'N/A'}, ${item.origin?.state || ''}`} → {`${item.destination?.city || 'N/A'}, ${item.destination?.state || ''}`}</TableCell>
+                
                 <TableCell><Chip label={item.status?.replace(/_/g,' ') || 'N/A'} color={getStatusColor(item.status)} size="small" sx={{textTransform: 'capitalize'}} /></TableCell>
                 <TableCell>{item.scheduledPickupDate ? new Date(item.scheduledPickupDate).toLocaleDateString() : 'N/A'}</TableCell>
                 <TableCell>{item.scheduledDeliveryDate ? new Date(item.scheduledDeliveryDate).toLocaleDateString() : 'N/A'}</TableCell>
-                
-                {/* --- CORRECTED RATE DISPLAY --- */}
                 <TableCell>
                   {activeTab === 'quotes' 
                     ? `$${(item.totalCustomerRate ?? item.customerRate)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'}` 
                     : item.containerNumber || 'N/A'}
                 </TableCell>
-
                 <TableCell>{item.proNumber || 'N/A'}</TableCell>
                 <TableCell align="center">
                   <Tooltip title="Add Check-in"><IconButton size="small" onClick={() => onAddCheckIn(item)} disabled={activeTab === 'quotes'}><CheckIcon fontSize="inherit"/></IconButton></Tooltip>

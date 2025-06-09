@@ -14,7 +14,7 @@ import QuoteFormDialog, { QuoteFormData } from '../shipments/components/QuoteFor
 import ShipmentsTable from '../shipments/components/ShipmentsTable';
 import EmailGenDialog from '../shipments/components/EmailGenDialog';
 import { mapShipmentToQuoteFormData, initialQuoteFormData } from '../shipments/utils/shipmentFormMappers';
-import { Shipment } from '../shipments/ShipmentsPage'; // Re-use the main Shipment interface
+import { Shipment } from '../shipments/ShipmentsPage';
 
 // Define local types for clarity
 interface ShipperStub { _id: string; name: string; contact?: { email?: string; name?: string; }; }
@@ -84,15 +84,17 @@ const QuotesPage: React.FC = () => {
   const handleCloseQuoteForm = () => { setIsQuoteFormOpen(false); setEditingQuoteInitialData(null); };
 
   const handleSaveQuoteForm = (formDataFromDialog: QuoteFormData, idToUpdate?: string) => {
-    // The create/update logic is complex and best handled by a shared utility or service
-    // For now, we construct a basic payload knowing it's a quote.
     const apiPayload = { ...formDataFromDialog, status: 'quote' };
-    if (apiPayload.shipper === '') {
-      delete (apiPayload as any).shipper;
+
+    if (apiPayload.accessorials && Array.isArray(apiPayload.accessorials)) {
+      apiPayload.accessorials = apiPayload.accessorials.filter(
+        acc => acc.accessorialTypeId && acc.accessorialTypeId.trim() !== ''
+      );
     }
-    if (apiPayload.carrier === '') {
-      delete (apiPayload as any).carrier;
-    }
+    
+    if (apiPayload.shipper === '') delete (apiPayload as any).shipper;
+    if (apiPayload.carrier === '') delete (apiPayload as any).carrier;
+    
     quoteMutation.mutate({ id: idToUpdate || formDataFromDialog._id, formData: apiPayload });
   };
   

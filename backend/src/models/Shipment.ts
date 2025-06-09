@@ -274,83 +274,40 @@ const shipmentSchema = new Schema<IShipment>({
   timestamps: true
 });
 
-// Define defaultControllerQuoteFormSettings here as well if model pre-save hook needs it
-// For now, the shipment number generation logic is simplified to not depend on it directly.
 const modelDefaultQuoteFormSettings: IQuoteFormSettings = {
-    requiredFields: [], // Not used by model directly for validation, controller handles it.
+    requiredFields: [],
     quoteNumberPrefix: 'QT-',
     quoteNumberNextSequence: 1000, // Placeholder
 };
 
 
 shipmentSchema.pre<IShipment>('save', async function(next) {
-  // This hook will now ONLY handle logic for NEW documents.
-  // All update logic is now explicitly in the controller.
-  if (this.isNew) {
-    // --- Financial calculations for new documents ---
-    const lineHaulCustomer = this.customerRate || 0;
-    const lineHaulCarrier = this.carrierCostTotal || 0;
-
-    let fscCustomerValue = 0;
-    if (this.fscType === 'percentage' && this.fscCustomerAmount != null) {
-      fscCustomerValue = lineHaulCustomer * (this.fscCustomerAmount / 100);
-    } else if (this.fscType === 'fixed' && this.fscCustomerAmount != null) {
-      fscCustomerValue = this.fscCustomerAmount;
-    }
-
-    let fscCarrierValue = 0;
-    if (this.fscType === 'percentage' && this.fscCarrierAmount != null) {
-      fscCarrierValue = lineHaulCarrier * (this.fscCarrierAmount / 100);
-    } else if (this.fscType === 'fixed' && this.fscCarrierAmount != null) {
-      fscCarrierValue = this.fscCarrierAmount;
-    }
-
-    const chassisCustomerValue = this.chassisCustomerCost || 0;
-    const chassisCarrierValue = this.chassisCostCarrier || 0;
-
-    let calculatedTotalCustomerRate = lineHaulCustomer + fscCustomerValue + chassisCustomerValue;
-    let calculatedTotalCarrierCost = lineHaulCarrier + fscCarrierValue + chassisCarrierValue;
-
-    if (this.accessorials && this.accessorials.length > 0) {
-      this.accessorials.forEach(acc => {
-        calculatedTotalCustomerRate += (acc.customerRate || 0) * (acc.quantity || 1);
-        calculatedTotalCarrierCost += (acc.carrierCost || 0) * (acc.quantity || 1);
-      });
-    }
-
-    this.totalCustomerRate = calculatedTotalCustomerRate;
-    this.totalCarrierCost = calculatedTotalCarrierCost;
-    this.grossProfit = this.totalCustomerRate - this.totalCarrierCost;
-    this.margin = this.totalCustomerRate > 0 ? (this.grossProfit / this.totalCustomerRate) * 100 : 0;
+  if (this.isNew && (!this.shipmentNumber || this.shipmentNumber.trim() === '')) {
+    let attempts = 0;
+    let unique = false;
+    let generatedNumber = '';
+    const ShipmentModelInstance = mongoose.model<IShipment>('Shipment');
     
-    // --- Shipment Number generation for new documents ---
-    if (!this.shipmentNumber || this.shipmentNumber.trim() === '') {
-      let attempts = 0;
-      let unique = false;
-      let generatedNumber = '';
-      const ShipmentModelInstance = mongoose.model<IShipment>('Shipment');
-      
-      let prefixToUse = this.modeOfTransport ? this.modeOfTransport.substring(0,2).toUpperCase().replace('-', '') : "GN";
+    let prefixToUse = this.modeOfTransport ? this.modeOfTransport.substring(0,2).toUpperCase().replace('-', '') : "GN";
 
-      if (this.status === 'quote') {
-          try {
-              const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
-              if (settingsDoc && settingsDoc.settings) {
-                  prefixToUse = (settingsDoc.settings as IQuoteFormSettings).quoteNumberPrefix || prefixToUse;
-              }
-          } catch (settingsError) {
-              logger.error("Could not fetch quote settings for prefix.", settingsError);
-          }
-      }
-      
-      while(!unique && attempts < 5) {
-          generatedNumber = `${prefixToUse}${nanoidTms()}`;
-          const existing = await ShipmentModelInstance.findOne({ shipmentNumber: generatedNumber }).select('_id').lean();
-          if (!existing) unique = true;
-          attempts++;
-      }
-      this.shipmentNumber = unique ? generatedNumber : `TMS-ERR-${Date.now()}-${generateNanoid(5)}`;
+    if (this.status === 'quote') {
+        try {
+            const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
+            if (settingsDoc && settingsDoc.settings) {
+                prefixToUse = (settingsDoc.settings as IQuoteFormSettings).quoteNumberPrefix || prefixToUse;
+            }
+        } catch (settingsError) {
+            logger.error("Could not fetch quote settings for prefix.", settingsError);
+        }
     }
+    
+    while(!unique && attempts < 5) {
+        generatedNumber = `${prefixToUse}${nanoidTms()}`;
+        const existing = await ShipmentModelInstance.findOne({ shipmentNumber: generatedNumber }).select('_id').lean();
+        if (!existing) unique = true;
+        attempts++;
+    }
+    this.shipmentNumber = unique ? generatedNumber : `TMS-ERR-${Date.now()}-${generateNanoid(5)}`;
   }
   next();
 });
