@@ -21,4 +21,5 @@ export const config = {
   awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
   awsRegion: process.env.AWS_REGION || '',
   s3BucketName: process.env.S3_BUCKET_NAME || '',
+  fileStorageStrategy: process.env.FILE_STORAGE_STRATEGY || 'local',
 };

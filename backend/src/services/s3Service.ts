@@ -54,4 +54,18 @@ export class S3Service {
             logger.error(`Error deleting file from S3: ${key}`, error);
         }
     }
+    
+    public async getDownloadUrl(doc: any): Promise<string> {
+        if (!doc || !doc.s3Key) {
+            throw new Error("Document key is missing for generating signed URL.");
+        }
+        
+        const command = new GetObjectCommand({
+            Bucket: config.s3BucketName,
+            Key: doc.s3Key,
+        });
+
+        // The URL will be valid for 1 hour by default.
+        return getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    }
 }

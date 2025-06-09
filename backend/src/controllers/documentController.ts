@@ -1,22 +1,15 @@
-// File: backend/src/controllers/documentController.ts
 import { Response } from 'express';
 import { AuthenticatedRequest } from '../types/AuthenticatedRequest';
 import mongoose from 'mongoose';
-import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import { Document as DocModel } from '../models/Document';
 import { User } from '../models/User';
 import { logger } from '../utils/logger';
-import { S3Service } from '../services/s3Service'; // Import S3 Service
+import { fileService, upload } from '../services/fileService'; // Import from our new fileService
+import { config } from '../config/database';
 
-const s3Service = new S3Service();
-
-// --- CHANGE: Use memory storage instead of disk storage ---
-const storage = multer.memoryStorage();
-
-export const upload = multer({
-  storage: storage,
-  limits: { fileSize: 1024 * 1024 * 25 }, // 25MB limit
-});
+export { upload }; // Re-export multer instance for use in routes
 
 export class DocumentController {
   async uploadDocuments(req: AuthenticatedRequest, res: Response): Promise<void> {
@@ -30,22 +23,21 @@ export class DocumentController {
     const uploadedByUserId = req.user?._id || (await User.findOne({ role: 'admin' }).select('_id').lean())?._id;
 
     if (!uploadedByUserId) {
-        logger.error('CRITICAL: No user context for upload and no default admin found.');
         res.status(500).json({ success: false, message: 'Cannot process upload: No user context.' });
         return;
     }
 
     try {
         const documentPromises = files.map(async (file) => {
-            const { key, location } = await s3Service.uploadFile(file);
+            const { key, location } = await fileService.uploadFile(file);
             return {
-                filename: file.originalname,
+                filename: file.filename || path.basename(key), // Use multer filename for local, S3 key for S3
                 originalName: file.originalname,
                 mimetype: file.mimetype,
                 size: file.size,
-                s3Key: key,
+                s3Key: key, // We'll use this field for both S3 key and local path
                 s3Location: location,
-                tags: tags ? String(tags).split(',').map(tag => tag.trim()).filter(Boolean) : [],
+                tags: tags ? String(tags).split(',').map((tag: string) => tag.trim()).filter(Boolean) : [],
                 relatedTo: {
                     type: relatedToType || 'general',
                     id: relatedToId && mongoose.Types.ObjectId.isValid(relatedToId) ? new mongoose.Types.ObjectId(relatedToId) : undefined
@@ -57,7 +49,7 @@ export class DocumentController {
         const documentsToSave = await Promise.all(documentPromises);
         const savedDocuments = await DocModel.insertMany(documentsToSave);
         
-        logger.info(`${savedDocuments.length} documents uploaded to S3 and saved to DB.`);
+        logger.info(`${savedDocuments.length} document(s) uploaded via ${config.fileStorageStrategy} strategy.`);
         res.status(201).json({ success: true, message: `${savedDocuments.length} document(s) uploaded.`, data: savedDocuments });
 
     } catch (error: any) {
@@ -70,62 +62,73 @@ export class DocumentController {
     const { id } = req.params;
     try {
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            res.status(400).json({ success: false, message: 'Invalid document ID.' });
-            return;
+            return res.status(400).json({ success: false, message: 'Invalid document ID.' });
         }
         const doc = await DocModel.findById(id).lean();
         if (!doc || !doc.s3Key) {
-            res.status(404).json({ success: false, message: 'Document not found or path missing.' });
-            return;
+            return res.status(404).json({ success: false, message: 'Document not found or path missing.' });
         }
-        
-        const signedUrl = await s3Service.getSignedUrl(doc.s3Key);
-        logger.info(`Generated signed URL for document: ${doc.originalName}`);
-        
-        // Redirect the user's browser to the secure, temporary S3 URL
-        res.redirect(302, signedUrl);
 
+        // --- THE FIX IS HERE ---
+        // We now use the generic fileService regardless of the strategy.
+        if (config.fileStorageStrategy === 's3') {
+            const signedUrl = await fileService.getDownloadUrl(doc);
+            logger.info(`Redirecting to S3 signed URL for document: ${doc.originalName}`);
+            res.redirect(302, signedUrl);
+        } else {
+            // For local strategy, we still need to stream the file from disk.
+            const filePath = doc.s3Key; // For local, the key is the path
+            if (!fs.existsSync(filePath)) {
+                logger.error(`File not found on disk for document ${id} at path: ${filePath}`);
+                return res.status(404).json({ success: false, message: 'File not found on server.' });
+            }
+            logger.info(`Streaming local file: ${doc.originalName} from path: ${filePath}`);
+            res.download(filePath, doc.originalName);
+        }
     } catch (error: any) {
-        logger.error('Error getting signed URL for download:', { message: error.message, docId: id });
-        res.status(500).json({ success: false, message: 'Could not generate download link.' });
+        logger.error('Error in downloadDocument:', { message: error.message, docId: id });
+        res.status(500).json({ success: false, message: 'Could not process download.' });
     }
   }
 
   async deleteDocument(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
+    logger.info(`Attempting to delete document with ID: ${id}`);
+    
     try {
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            res.status(400).json({ success: false, message: 'Invalid document ID.' });
-            return;
+            return res.status(400).json({ success: false, message: 'Invalid document ID.' });
         }
-        const doc = await DocModel.findByIdAndDelete(id);
+
+        const doc = await DocModel.findById(id);
         if (!doc) {
-            res.status(404).json({ success: false, message: 'Document not found.' });
-            return;
+            return res.status(404).json({ success: false, message: 'Document not found in database.' });
         }
 
-        // Asynchronously delete from S3 after successfully deleting from DB
-        s3Service.deleteFile(doc.s3Key).catch(err => {
-            logger.error(`Failed to delete file from S3 bucket, but DB record was removed. Key: ${doc.s3Key}`, err);
-        });
+        // Step 1: Attempt to delete the file from the storage provider (S3 or local)
+        await fileService.deleteFile(doc.s3Key);
+        logger.info(`Successfully deleted file from storage. Key: ${doc.s3Key}`);
 
-        logger.info(`Document metadata deleted from DB for ID: ${id}`);
+        // Step 2: Only if file deletion is successful, delete the database record.
+        await DocModel.findByIdAndDelete(id);
+        logger.info(`Successfully deleted document record from database for ID: ${id}`);
+
         res.status(200).json({ success: true, message: 'Document deleted successfully.' });
+
     } catch (error: any) {
-        logger.error('Error deleting document:', { message: error.message, docId: id });
-        res.status(500).json({ success: false, message: 'Error deleting document.' });
+        logger.error('Error during document deletion process:', { message: error.message, docId: id });
+        // If the error came from fileService, the DB record is likely still there, which is safe.
+        res.status(500).json({ success: false, message: 'Error deleting document.', errorDetails: error.message });
     }
   }
-
+  
   async getDocuments(req: AuthenticatedRequest, res: Response): Promise<void> {
     logger.info('Attempting to get documents. Query params:', req.query);
     try {
-      const pageQuery = req.query.page as string | undefined;
-      const limitQuery = req.query.limit as string | undefined;
-      const { originalName, tags, relatedToType, relatedToId, sort = '-createdAt' } = req.query;
-
-      const page = pageQuery ? parseInt(pageQuery, 10) : 1;
-      const limit = limitQuery ? parseInt(limitQuery, 10) : 100;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 100;
+      const sort = (req.query.sort as string) || '-createdAt';
+      const { originalName, tags, relatedToType, relatedToId } = req.query;
 
       const query: any = {};
       if (originalName) query.originalName = { $regex: originalName, $options: 'i' };
@@ -137,25 +140,24 @@ export class DocumentController {
 
       const documents = await DocModel.find(query)
         .populate('uploadedBy', 'firstName lastName email')
-        .sort(sort as string)
+        .sort(sort)
         .limit(limit)
         .skip((page - 1) * limit)
         .lean();
 
       const total = await DocModel.countDocuments(query);
+      
       logger.info(`Found ${documents.length} documents, total matching query: ${total}.`);
 
+      // --- SIMPLIFIED RESPONSE ---
       res.status(200).json({
         success: true,
-        message: "Documents fetched successfully",
-        data: {
-          documents,
-          pagination: { page, limit, total, pages: Math.ceil(total / limit) },
-        },
+        documents: documents, // Send documents at the top level of the data object
+        pagination: { page, limit, total, pages: Math.ceil(total / limit) },
       });
     } catch (error: any) {
       logger.error('CRITICAL ERROR in getDocuments:', { message: error.message });
-      res.status(500).json({ success: false, message: 'Error fetching documents', errorDetails: error.message });
+      res.status(500).json({ success: false, message: 'Error fetching documents' });
     }
   }
 }
