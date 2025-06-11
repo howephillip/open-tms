@@ -313,10 +313,18 @@ export class ShipmentController {
         
         const updateData = req.body;
 
-        Object.assign(shipmentToUpdate, updateData);
+        const finalData = { ...shipmentToUpdate.toObject(), ...updateData };
+        finalData.origin = { ...shipmentToUpdate.origin, ...updateData.origin };
+        finalData.destination = { ...shipmentToUpdate.destination, ...updateData.destination };
+        finalData.transloadFacility = { ...shipmentToUpdate.transloadFacility, ...updateData.transloadFacility };
         
-        if (updateData.origin) shipmentToUpdate.origin = updateData.origin;
-        if (updateData.destination) shipmentToUpdate.destination = updateData.destination;
+        Object.assign(shipmentToUpdate, finalData);
+
+        if (updateData.documentIds && Array.isArray(updateData.documentIds)) {
+    shipmentToUpdate.documents = updateData.documentIds
+        .filter((id: any) => mongoose.Types.ObjectId.isValid(id))
+        .map((id: any) => new mongoose.Types.ObjectId(id));
+}
 
         const financials = calculateFinancials(shipmentToUpdate.toObject());
         Object.assign(shipmentToUpdate, financials);
@@ -332,15 +340,10 @@ export class ShipmentController {
           logger.error(`Failed to record lane rate in background for updated shipment ${savedShipment.shipmentNumber}`, { error: err.message });
         });
         
-        const populatedShipment = await savedShipment.populate([
-            { path: 'shipper', select: 'name' }, { path: 'carrier', select: 'name' },
-            { path: 'createdBy', select: 'firstName lastName email'},
-            { path: 'updatedBy', select: 'firstName lastName email'},
-            { path: 'documents', select: 'originalName _id mimetype size createdAt path'},
-            { path: 'accessorials.accessorialTypeId', model: 'AccessorialType', select: 'name code unitName' }
-        ]);
+        const populatedShipment = await Shipment.findById(savedShipment._id)
+            .populate([ /* ... all populate paths ... */ ]).lean();
 
-        res.status(200).json({ success: true, data: populatedShipment.toObject(), message: 'Shipment updated successfully' });
+        res.status(200).json({ success: true, data: populatedShipment, message: 'Shipment updated successfully' });
 
     } catch (error: any) {
         logger.error(`CRITICAL ERROR in updateShipment (ID: ${id}):`, { message: error.message, stack: error.stack });

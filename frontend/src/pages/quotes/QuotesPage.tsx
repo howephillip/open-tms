@@ -85,9 +85,10 @@ const QuotesPage: React.FC = () => {
 
   const handleSaveQuoteForm = (formDataFromDialog: QuoteFormData, idToUpdate?: string) => {
     const apiPayload = { ...formDataFromDialog, status: 'quote' };
+    apiPayload.documentIds = formDataFromDialog.documentIds || [];
 
     if (apiPayload.accessorials && Array.isArray(apiPayload.accessorials)) {
-      apiPayload.accessorials = apiPayload.accessorials.filter(
+        apiPayload.accessorials = apiPayload.accessorials.filter(
         acc => acc.accessorialTypeId && acc.accessorialTypeId.trim() !== ''
       );
     }
