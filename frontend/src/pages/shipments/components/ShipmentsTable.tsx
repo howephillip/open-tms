@@ -79,7 +79,7 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
                 <TableCell sx={{textTransform: 'capitalize'}}>{item.modeOfTransport?.replace(/-/g, ' ') || 'N/A'}</TableCell>
                 <TableCell>{getDisplayName(item.shipper)}</TableCell>
                 <TableCell>{getDisplayName(item.carrier)}</TableCell>
-                <TableCell>{`${item.origin?.city || 'N/A'}, ${item.origin?.state || ''}`} → {`${item.destination?.city || 'N/A'}, ${item.destination?.state || ''}`}</TableCell>
+                <TableCell>{`${(item as any).originCity || 'N/A'}, ${(item as any).originState || ''}`} → {`${(item as any).destinationCity || 'N/A'}, ${(item as any).destinationState || ''}`}</TableCell>
                 
                 <TableCell>
                   <StatusUpdateSelect

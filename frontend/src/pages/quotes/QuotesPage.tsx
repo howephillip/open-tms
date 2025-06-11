@@ -48,7 +48,23 @@ const QuotesPage: React.FC = () => {
       ...(debouncedSearchTerm && { searchTerm: debouncedSearchTerm })
     }), { keepPreviousData: true });
   
-  const quotes: Shipment[] = apiResponse?.data?.data?.shipments || [];
+  const enrichedQuotes = (apiResponse?.data?.data?.shipments || []).map((quote: Shipment) => ({
+    ...quote,
+    originCity: quote.origin?.city || quote.stops?.[0]?.city || 'Unknown',
+    originState: quote.origin?.state || quote.stops?.[0]?.state || '',
+    destinationCity: quote.destination?.city || quote.stops?.[quote.stops.length - 1]?.city || 'Unknown',
+    destinationState: quote.destination?.state || quote.stops?.[quote.stops.length - 1]?.state || '',
+  }));
+  console.log("Enriched Quotes Preview:", enrichedQuotes.map(q => ({
+    id: q._id,
+    originCity: q.originCity,
+    originState: q.originState,
+    destinationCity: q.destinationCity,
+    destinationState: q.destinationState,
+    stops: q.stops?.length
+  })));
+
+  const quotes: Shipment[] = enrichedQuotes;
 
   const { data: shippersResponse, isLoading: isLoadingShippers } = useQuery('shippersListForForms', () => shipperAPI.getAll({ limit: 200, select: 'name _id' }));
   const shippersList: ShipperStub[] = shippersResponse?.data?.data?.shippers || [];

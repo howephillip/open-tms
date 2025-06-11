@@ -277,6 +277,12 @@ export class ShipmentController {
             shipmentToUpdate.stops = updateData.stops;
         }
 
+        // Update origin and destination based on stops if stops is valid
+        if (Array.isArray(shipmentToUpdate.stops) && shipmentToUpdate.stops.length >= 2) {
+            shipmentToUpdate.origin = shipmentToUpdate.stops[0].location;
+            shipmentToUpdate.destination = shipmentToUpdate.stops[shipmentToUpdate.stops.length - 1].location;
+        }
+
         // --- END OF FIX ---
         
         const financials = calculateFinancials(shipmentToUpdate.toObject());
