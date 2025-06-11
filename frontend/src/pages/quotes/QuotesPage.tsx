@@ -15,6 +15,7 @@ import ShipmentsTable from '../shipments/components/ShipmentsTable';
 import EmailGenDialog from '../shipments/components/EmailGenDialog';
 import { mapShipmentToQuoteFormData, initialQuoteFormData } from '../shipments/utils/shipmentFormMappers';
 import { Shipment } from '../shipments/ShipmentsPage';
+import { quoteStatusOptions } from '../shipments/constants/shipmentOptions';
 
 // Define local types for clarity
 interface ShipperStub { _id: string; name: string; contact?: { email?: string; name?: string; }; }
@@ -43,7 +44,7 @@ const QuotesPage: React.FC = () => {
     () => shipmentAPI.getAll({ 
       limit: 100, 
       sort: '-createdAt', 
-      status: 'quote',
+       statusesIn: quoteStatusOptions.join(','), 
       ...(debouncedSearchTerm && { searchTerm: debouncedSearchTerm })
     }), { keepPreviousData: true });
   

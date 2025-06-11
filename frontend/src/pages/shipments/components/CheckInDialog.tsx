@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Grid, TextField, MenuItem, CircularProgress } from '@mui/material';
 import { toast } from 'react-toastify';
-import { statusOptions as allStatusOptions, checkinMethodOptions } from '../constants/shipmentOptions'; // Import options
+import { shipmentStatusOptions, checkinMethodOptions } from '../constants/shipmentOptions';
 
 // Types (could be shared)
 type StatusType = string;

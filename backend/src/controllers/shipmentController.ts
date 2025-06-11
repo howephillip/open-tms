@@ -109,92 +109,43 @@ function calculateFinancials(data: Partial<IShipment>): Partial<IShipment> {
 
 export class ShipmentController {
   async createShipment(req: AuthenticatedRequest, res: Response): Promise<void> {
-    logger.info('--- ENTERING createShipment ---');
+    logger.info('--- ENTERING createShipment with new stops model ---');
     try {
-      const flatData = req.body;
-      const isQuote = flatData.status === 'quote';
-      
-      const shipmentData: Partial<IShipment> = {
-        ...flatData,
-        origin: {
-          name: flatData.originName, address: flatData.originAddress, city: flatData.originCity,
-          state: flatData.originState, zip: flatData.originZip, country: flatData.originCountry,
-          locationType: flatData.originLocationType, contactName: flatData.originContactName,
-          contactPhone: flatData.originContactPhone, contactEmail: flatData.originContactEmail, notes: flatData.originNotes,
-        },
-        destination: {
-          name: flatData.destinationName, address: flatData.destinationAddress, city: flatData.destinationCity,
-          state: flatData.destinationState, zip: flatData.destinationZip, country: flatData.destinationCountry,
-          locationType: flatData.destinationLocationType, contactName: flatData.destinationContactName,
-          contactPhone: flatData.destinationContactPhone, contactEmail: flatData.destinationContactEmail, notes: flatData.destinationNotes,
-        },
-        transloadFacility: flatData.isTransload ? {
-            name: flatData.transloadFacilityName, address: flatData.transloadFacilityAddress,
-            city: flatData.transloadFacilityCity, state: flatData.transloadFacilityState,
-            zip: flatData.transloadFacilityZip,
-        } : undefined,
-      };
-      
-      const fieldsToRemove = [
-        'originName', 'originAddress', 'originCity', 'originState', 'originZip', 'originCountry', 'originLocationType', 'originContactName', 'originContactPhone', 'originContactEmail', 'originNotes',
-        'destinationName', 'destinationAddress', 'destinationCity', 'destinationState', 'destinationZip', 'destinationCountry', 'destinationLocationType', 'destinationContactName', 'destinationContactPhone', 'destinationContactEmail', 'destinationNotes',
-        'transloadFacilityName', 'transloadFacilityAddress', 'transloadFacilityCity', 'transloadFacilityState', 'transloadFacilityZip'
-      ];
-      fieldsToRemove.forEach(field => delete (shipmentData as any)[field]);
+      const payload = req.body;
+      const isQuote = payload.status === 'quote';
 
-      let requiredFields: string[] = [];
-      if (isQuote) {
-        const settingsDoc = await ApplicationSettings.findOne({ key: 'quoteForm' }).lean();
-        requiredFields = (settingsDoc?.settings as IQuoteFormSettings)?.requiredFields || defaultQuoteFormSettings.requiredFields;
-      } else {
-        const settingsDoc = await ApplicationSettings.findOne({ key: 'shipmentForm' }).lean();
-        requiredFields = (settingsDoc?.settings as IShipmentFormSettings)?.requiredFields || defaultShipmentFormSettings.requiredFields;
+      // --- NEW VALIDATION LOGIC FOR STOPS ---
+      if (!Array.isArray(payload.stops) || payload.stops.length < 2) {
+        return res.status(400).json({ success: false, message: 'A shipment must have at least a pickup and a dropoff stop.' });
       }
 
-      const missingFields: string[] = [];
-      requiredFields.forEach(fieldId => {
-        const value = getFieldValue(shipmentData, fieldId);
-        if (fieldId === 'carrier' && isQuote && !value) { return; }
-        if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
-          missingFields.push(fieldId);
-        }
-      });
-      
-      if (missingFields.length > 0) {
-        res.status(400).json({ success: false, message: `Missing required fields: ${[...new Set(missingFields)].join(', ')}.` });
-        return;
-      }
+      // We no longer need to dynamically validate origin/destination from settings
+      // as the presence of stops is now the primary requirement.
+      // The old validation logic can be removed or adapted if needed.
 
       if (!req.user?._id) {
         const defaultUser = await User.findOne({ email: 'admin@example.com' }).select('_id').lean();
-        if (defaultUser) { shipmentData.createdBy = defaultUser._id; } 
+        if (defaultUser) { payload.createdBy = defaultUser._id; } 
         else {
-          res.status(500).json({ success: false, message: 'System configuration error: Default user not found.' });
-          return;
+          return res.status(500).json({ success: false, message: 'System configuration error: Default user not found.' });
         }
       } else {
-        shipmentData.createdBy = req.user._id;
+        payload.createdBy = req.user._id;
       }
       
-      // Calculate financials before saving
-      const financials = calculateFinancials(shipmentData);
-      Object.assign(shipmentData, financials);
+      const financials = calculateFinancials(payload);
+      Object.assign(payload, financials);
 
-      const shipment = new Shipment(shipmentData);
+      const shipment = new Shipment(payload);
       await shipment.save();
-      logger.info('Shipment saved successfully', { shipmentId: shipment._id });
+      logger.info('Shipment with stops saved successfully', { shipmentId: shipment._id });
 
       laneRateService.recordLaneRateFromShipment(shipment.toObject()).catch(err => {
-        logger.error(`Failed to record lane rate in background for new shipment ${shipment.shipmentNumber}`, { error: err.message });
+        logger.error(`Failed to record lane rate for new shipment ${shipment.shipmentNumber}`, { error: err.message });
       });
       
-      const populatedShipment = await shipment.populate([
-            { path: 'shipper', select: 'name' }, { path: 'carrier', select: 'name' },
-            { path: 'createdBy', select: 'firstName lastName email'},
-            { path: 'documents', select: 'originalName _id mimetype size createdAt path'},
-            { path: 'accessorials.accessorialTypeId', select: 'name code unitName' }
-      ]);
-      res.status(201).json({ success: true, data: populatedShipment.toObject(), message: 'Shipment created successfully' });
+      const populatedShipment = await Shipment.findById(shipment._id).populate([ /* ... */ ]).lean();
+      res.status(201).json({ success: true, data: populatedShipment, message: 'Shipment created successfully' });
 
     } catch (error: any) {
       logger.error('CRITICAL ERROR in createShipment:', { message: error.message, stack: error.stack });
@@ -215,7 +166,7 @@ export class ShipmentController {
       const limit = parseInt(req.query.limit as string) || 100;
       const sortOptions = parseSortQuery(req.query.sort as string | undefined);
       
-      const { status, statusesNotIn, searchTerm, ...otherFilters } = req.query;
+      const { status, statusesNotIn, statusesIn, searchTerm, ...otherFilters } = req.query;
       const matchConditions: any[] = [];
 
       if (status) {
@@ -223,6 +174,9 @@ export class ShipmentController {
       } else if (statusesNotIn) {
         const notInArray = Array.isArray(statusesNotIn) ? statusesNotIn : (statusesNotIn as string).split(',');
         matchConditions.push({ status: { $nin: notInArray } });
+        } else if (statusesIn) {
+        const inArray = Array.isArray(statusesIn) ? statusesIn : (statusesIn as string).split(',');
+        matchConditions.push({ status: { $in: inArray } });
       }
       
       Object.keys(otherFilters).forEach(key => {
@@ -313,19 +267,18 @@ export class ShipmentController {
         
         const updateData = req.body;
 
-        const finalData = { ...shipmentToUpdate.toObject(), ...updateData };
-        finalData.origin = { ...shipmentToUpdate.origin, ...updateData.origin };
-        finalData.destination = { ...shipmentToUpdate.destination, ...updateData.destination };
-        finalData.transloadFacility = { ...shipmentToUpdate.transloadFacility, ...updateData.transloadFacility };
+        // --- START OF FIX: Manually map ALL fields, including nested objects ---
         
-        Object.assign(shipmentToUpdate, finalData);
+        // Apply all direct fields from updateData to the Mongoose document
+        Object.assign(shipmentToUpdate, updateData);
 
-        if (updateData.documentIds && Array.isArray(updateData.documentIds)) {
-    shipmentToUpdate.documents = updateData.documentIds
-        .filter((id: any) => mongoose.Types.ObjectId.isValid(id))
-        .map((id: any) => new mongoose.Types.ObjectId(id));
-}
+        // Explicitly handle the new 'stops' array if it exists
+        if (updateData.stops && Array.isArray(updateData.stops)) {
+            shipmentToUpdate.stops = updateData.stops;
+        }
 
+        // --- END OF FIX ---
+        
         const financials = calculateFinancials(shipmentToUpdate.toObject());
         Object.assign(shipmentToUpdate, financials);
 
@@ -334,14 +287,12 @@ export class ShipmentController {
         }
 
         const savedShipment = await shipmentToUpdate.save();
-        logger.info('Shipment update and save successful.', { shipmentId: savedShipment._id });
         
         laneRateService.recordLaneRateFromShipment(savedShipment.toObject()).catch(err => {
           logger.error(`Failed to record lane rate in background for updated shipment ${savedShipment.shipmentNumber}`, { error: err.message });
         });
         
-        const populatedShipment = await Shipment.findById(savedShipment._id)
-            .populate([ /* ... all populate paths ... */ ]).lean();
+        const populatedShipment = await Shipment.findById(savedShipment._id).populate([ /* ...populate paths... */ ]).lean();
 
         res.status(200).json({ success: true, data: populatedShipment, message: 'Shipment updated successfully' });
 

@@ -1,8 +1,7 @@
-// File: frontend/src/pages/shipments/components/ShipmentsTable.tsx
 import React from 'react';
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, Chip, IconButton, Tooltip, Link as MuiLink
+  Paper, IconButton, Tooltip, Link as MuiLink
 } from '@mui/material';
 import {
   Edit as EditIcon, Visibility as ViewIcon,
@@ -10,8 +9,10 @@ import {
   DeleteOutline as DeleteIcon,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
+import StatusUpdateSelect from '../../../components/common/StatusUpdateSelect';
+import { quoteStatusOptions, shipmentStatusOptions } from '../constants/shipmentOptions';
 
-// Updated interface to expect the full objects
+
 interface ShipmentRowData {
   _id: string;
   shipmentNumber?: string;
@@ -39,14 +40,12 @@ interface ShipmentsTableProps {
   onGenerateEmail: (item: ShipmentRowData) => void;
   onDeleteItem: (item: ShipmentRowData) => void;
   getDisplayName: (entity: any) => string;
-  getStatusColor: (status: string | undefined) => "default" | "primary" | "secondary" | "warning" | "info" | "success" | "error";
 }
 
 const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
   items, isLoading, activeTab,
   onEditItem, onViewDetails, onAddCheckIn, onGenerateEmail,
-  onDeleteItem,
-  getDisplayName, getStatusColor
+  onDeleteItem, getDisplayName
 }) => {
   return (
     <TableContainer component={Paper}>
@@ -58,7 +57,7 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
             <TableCell sx={{minWidth: 150}}>Shipper</TableCell>
             <TableCell sx={{minWidth: 150}}>{activeTab === 'quotes' ? 'Est. Carrier' : 'Carrier'}</TableCell>
             <TableCell sx={{minWidth: 180}}>Origin → Dest.</TableCell>
-            <TableCell sx={{minWidth: 120}}>Status</TableCell>
+            <TableCell sx={{minWidth: 180}}>Status</TableCell>
             <TableCell sx={{minWidth: 100}}>Pickup</TableCell>
             <TableCell sx={{minWidth: 100}}>Delivery</TableCell>
             <TableCell sx={{minWidth: 120}}>{activeTab === 'quotes' ? 'Quoted Rate' : 'Container #'}</TableCell>
@@ -80,11 +79,17 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
                 <TableCell sx={{textTransform: 'capitalize'}}>{item.modeOfTransport?.replace(/-/g, ' ') || 'N/A'}</TableCell>
                 <TableCell>{getDisplayName(item.shipper)}</TableCell>
                 <TableCell>{getDisplayName(item.carrier)}</TableCell>
-
-                {/* --- THIS IS THE FIX --- */}
                 <TableCell>{`${item.origin?.city || 'N/A'}, ${item.origin?.state || ''}`} → {`${item.destination?.city || 'N/A'}, ${item.destination?.state || ''}`}</TableCell>
                 
-                <TableCell><Chip label={item.status?.replace(/_/g,' ') || 'N/A'} color={getStatusColor(item.status)} size="small" sx={{textTransform: 'capitalize'}} /></TableCell>
+                <TableCell>
+                  <StatusUpdateSelect
+                    shipmentId={item._id}
+                    currentStatus={item.status || (activeTab === 'quotes' ? 'quote' : 'booked')}
+                    statusOptions={activeTab === 'quotes' ? quoteStatusOptions : shipmentStatusOptions}
+                    queryToInvalidate={activeTab}
+                  />
+                </TableCell>
+                
                 <TableCell>{item.scheduledPickupDate ? new Date(item.scheduledPickupDate).toLocaleDateString() : 'N/A'}</TableCell>
                 <TableCell>{item.scheduledDeliveryDate ? new Date(item.scheduledDeliveryDate).toLocaleDateString() : 'N/A'}</TableCell>
                 <TableCell>

@@ -21,8 +21,12 @@ import {
 } from '../utils/shipmentFormMappers'; 
 
 import { 
-    modeOfTransportOptions, statusOptions, locationTypeOptions, 
-    weightUnitOptions, equipmentUnitOptions, tempUnitOptions
+    modeOfTransportOptions, 
+    shipmentStatusOptions,
+    locationTypeOptions, 
+    weightUnitOptions, 
+    equipmentUnitOptions, 
+    tempUnitOptions,
 } from '../constants/shipmentOptions'; 
 
 // Type Definitions
@@ -79,7 +83,13 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
       if (initialData) {
         setFormData({ ...dialogInitialShipmentFormData, ...initialData, documentIds: initialData.documentIds || [], attachedDocuments: initialData.attachedDocuments || [] });
       } else {
-        setFormData({...dialogInitialShipmentFormData, status: 'booked'});
+        setFormData({
+          ...dialogInitialShipmentFormData,
+          status: 'booked',
+          equipmentType: equipmentTypesList.length ? equipmentTypesList[0].name : '',
+          shipper: shippersList.length ? shippersList[0]._id : '',
+          carrier: carriersList.length ? carriersList[0]._id : ''
+        });
       }
       setFilesToUpload([]);
     }
@@ -161,9 +171,18 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
   };
 
   const isFieldRequired = (fieldId: string) => {
-    return shipmentSettings?.requiredFields.includes(fieldId);
+    return !!shipmentSettings?.requiredFields.includes(fieldId);
   }
 
+  const getVisibleStatusOptions = () => {
+    let options = shipmentStatusOptions.filter(s => s !== 'quote'); 
+    if (formData.status && !options.includes(formData.status)) {
+        options = [formData.status, ...options];
+    }
+    return options;
+  };
+
+  const visibleStatusOptions = getVisibleStatusOptions();
   const isFormLoading = isLoading || isUploading || isLoadingSettings;
 
   return (
@@ -176,21 +195,108 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
             {/* Section 1: Core Info */}
             <Grid item xs={12}><Typography variant="overline">Core Information</Typography><Divider /></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Shipment Number" name="shipmentNumber" value={formData.shipmentNumber} onChange={handleInputChange} helperText={!formData._id ? "Auto-generated if new & empty" : ""} /></Grid>
-            <Grid item xs={12} sm={6} md={3}><TextField size="small" select fullWidth label={`Mode of Transport${isFieldRequired('modeOfTransport') ? '*' : ''}`} name="modeOfTransport" value={formData.modeOfTransport} onChange={(e) => handleSelectChange('modeOfTransport', e.target.value as any)} required={isFieldRequired('modeOfTransport')}>
-                {modeOfTransportOptions.map(mode => <MenuItem key={mode} value={mode} sx={{textTransform: 'capitalize'}}>{mode.replace(/-/g, ' ')}</MenuItem>)}
-            </TextField></Grid>
-            <Grid item xs={12} sm={6} md={3}><TextField size="small" select fullWidth label={`Status${isFieldRequired('status') ? '*' : ''}`} name="status" value={formData.status} onChange={(e) => handleSelectChange('status', e.target.value as any)} required={isFieldRequired('status')}>
-                {statusOptions.filter(s => s !== 'quote').map(s => <MenuItem key={s} value={s} sx={{textTransform: 'capitalize'}}>{s.replace(/_/g, ' ')}</MenuItem>)}
-            </TextField></Grid>
-            <Grid item xs={12} sm={6} md={3}><TextField size="small" select fullWidth label={`Equipment Type${isFieldRequired('equipmentType') ? '*' : ''}`} name="equipmentType" value={formData.equipmentType} onChange={(e) => handleSelectChange('equipmentType', e.target.value)} required={isFieldRequired('equipmentType')} disabled={isLoadingEquipmentTypes}>
-                {isLoadingEquipmentTypes ? <MenuItem value=""><em>Loading...</em></MenuItem> : equipmentTypesList.map(eq => <MenuItem key={eq._id} value={eq.name}>{eq.name}</MenuItem>)}
-            </TextField></Grid>
-            <Grid item xs={12} sm={6}><TextField size="small" select fullWidth label={`Shipper${isFieldRequired('shipper') ? '*' : ''}`} name="shipper" value={formData.shipper} onChange={(e) => handleSelectChange('shipper', e.target.value)} required={isFieldRequired('shipper')} disabled={isLoadingShippers}>
-                {isLoadingShippers? <MenuItem value=""><em>Loading...</em></MenuItem> : shippersList.map(s => <MenuItem key={s._id} value={s._id}>{s.name}</MenuItem>)}
-            </TextField></Grid>
-            <Grid item xs={12} sm={6}><TextField size="small" select fullWidth label={`Carrier${isFieldRequired('carrier') ? '*' : ''}`} name="carrier" value={formData.carrier} onChange={(e) => handleSelectChange('carrier', e.target.value)} required={isFieldRequired('carrier')} disabled={isLoadingCarriers}>
-                {isLoadingCarriers? <MenuItem value=""><em>Loading...</em></MenuItem> : carriersList.map(c => <MenuItem key={c._id} value={c._id}>{c.name}</MenuItem>)}
-            </TextField></Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label={`Mode of Transport${isFieldRequired('modeOfTransport') ? '*' : ''}`}
+                name="modeOfTransport"
+                value={modeOfTransportOptions.includes(formData.modeOfTransport) ? formData.modeOfTransport : ''}
+                onChange={(e) => handleSelectChange('modeOfTransport', e.target.value as any)}
+                required={isFieldRequired('modeOfTransport')}
+              >
+                {modeOfTransportOptions.map(mode => (
+                  <MenuItem key={mode} value={mode} sx={{ textTransform: 'capitalize' }}>
+                    {mode.replace(/-/g, ' ')}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label={`Status${isFieldRequired('status') ? '*' : ''}`}
+                name="status"
+                value={visibleStatusOptions.includes(formData.status) ? formData.status : ''}
+                onChange={(e) => handleSelectChange('status', e.target.value as any)}
+                required={isFieldRequired('status')}
+              >
+                {getVisibleStatusOptions().map(s => (
+                  <MenuItem key={s} value={s} sx={{ textTransform: 'capitalize' }}>
+                    {s.replace(/_/g, ' ')}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label={`Equipment Type${isFieldRequired('equipmentType') ? '*' : ''}`}
+                name="equipmentType"
+                value={equipmentTypesList.some(eq => eq.name === formData.equipmentType) ? formData.equipmentType : ''}
+                onChange={(e) => handleSelectChange('equipmentType', e.target.value)}
+                required={isFieldRequired('equipmentType')}
+                disabled={isLoadingEquipmentTypes}
+              >
+                <MenuItem value="">
+                  <em>Select...</em>
+                </MenuItem>
+                {equipmentTypesList.map(eq => (
+                  <MenuItem key={eq._id} value={eq.name}>
+                    {eq.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label={`Shipper${isFieldRequired('shipper') ? '*' : ''}`}
+                name="shipper"
+                value={shippersList.some(s => s._id === formData.shipper) ? formData.shipper : ''}
+                onChange={(e) => handleSelectChange('shipper', e.target.value)}
+                required={isFieldRequired('shipper')}
+                disabled={isLoadingShippers}
+              >
+                <MenuItem value="">
+                  <em>Select Shipper</em>
+                </MenuItem>
+                {shippersList.map(s => (
+                  <MenuItem key={s._id} value={s._id}>
+                    {s.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label={`Carrier${isFieldRequired('carrier') ? '*' : ''}`}
+                name="carrier"
+                value={carriersList.some(c => c._id === formData.carrier) ? formData.carrier : ''}
+                onChange={(e) => handleSelectChange('carrier', e.target.value)}
+                required={isFieldRequired('carrier')}
+                disabled={isLoadingCarriers}
+              >
+                <MenuItem value="">
+                  <em>Select Carrier</em>
+                </MenuItem>
+                {carriersList.map(c => (
+                  <MenuItem key={c._id} value={c._id}>
+                    {c.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </Grid>
             
             {/* Section 2: Dates & Times */}
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Dates & Times</Typography><Divider/></Grid>
@@ -205,7 +311,23 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Locations</Typography><Divider/></Grid>
             <Grid item xs={12} md={6}> <Typography variant="caption" display="block" gutterBottom>Origin Details</Typography> <Grid container spacing={1}>
                     <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Name" name="originName" value={formData.originName} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12} sm={6}><TextField size="small" select fullWidth label="Origin Location Type" name="originLocationType" value={formData.originLocationType} onChange={(e) => handleSelectChange('originLocationType', e.target.value as any)}> {locationTypeOptions.map(lt=><MenuItem key={`orig-${lt}`} value={lt} sx={{textTransform:'capitalize'}}>{lt.replace(/_/g, ' ')}</MenuItem>)} </TextField></Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        select
+                        fullWidth
+                        label="Origin Location Type"
+                        name="originLocationType"
+                        value={locationTypeOptions.includes(formData.originLocationType) ? formData.originLocationType : ''}
+                        onChange={(e) => handleSelectChange('originLocationType', e.target.value as any)}
+                      >
+                        {locationTypeOptions.map(lt => (
+                          <MenuItem key={`orig-${lt}`} value={lt} sx={{ textTransform: 'capitalize' }}>
+                            {lt.replace(/_/g, ' ')}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
                     <Grid item xs={12}><TextField size="small" fullWidth label={`Origin Address${isFieldRequired('origin.address') ? '*' : ''}`} name="originAddress" value={formData.originAddress} onChange={handleInputChange} required={isFieldRequired('origin.address')} /></Grid>
                     <Grid item xs={12} sm={4}><TextField size="small" fullWidth label={`Origin City${isFieldRequired('origin.city') ? '*' : ''}`} name="originCity" value={formData.originCity} onChange={handleInputChange} required={isFieldRequired('origin.city')} /></Grid>
                     <Grid item xs={12} sm={2}><TextField size="small" fullWidth label={`Origin State${isFieldRequired('origin.state') ? '*' : ''}`} name="originState" value={formData.originState} onChange={handleInputChange} required={isFieldRequired('origin.state')} /></Grid>
@@ -217,7 +339,23 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
                 </Grid></Grid>
             <Grid item xs={12} md={6}> <Typography variant="caption" display="block" gutterBottom>Destination Details</Typography> <Grid container spacing={1}>
                     <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Name" name="destinationName" value={formData.destinationName} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12} sm={6}><TextField size="small" select fullWidth label="Dest. Location Type" name="destinationLocationType" value={formData.destinationLocationType} onChange={(e) => handleSelectChange('destinationLocationType', e.target.value as any)}> {locationTypeOptions.map(lt=><MenuItem key={`dest-${lt}`} value={lt} sx={{textTransform:'capitalize'}}>{lt.replace(/_/g, ' ')}</MenuItem>)} </TextField></Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        select
+                        fullWidth
+                        label="Dest. Location Type"
+                        name="destinationLocationType"
+                        value={locationTypeOptions.includes(formData.destinationLocationType) ? formData.destinationLocationType : ''}
+                        onChange={(e) => handleSelectChange('destinationLocationType', e.target.value as any)}
+                      >
+                        {locationTypeOptions.map(lt => (
+                          <MenuItem key={`dest-${lt}`} value={lt} sx={{ textTransform: 'capitalize' }}>
+                            {lt.replace(/_/g, ' ')}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    </Grid>
                     <Grid item xs={12}><TextField size="small" fullWidth label={`Dest. Address${isFieldRequired('destination.address') ? '*' : ''}`} name="destinationAddress" value={formData.destinationAddress} onChange={handleInputChange} required={isFieldRequired('destination.address')} /></Grid>
                     <Grid item xs={12} sm={4}><TextField size="small" fullWidth label={`Dest. City${isFieldRequired('destination.city') ? '*' : ''}`} name="destinationCity" value={formData.destinationCity} onChange={handleInputChange} required={isFieldRequired('destination.city')} /></Grid>
                     <Grid item xs={12} sm={2}><TextField size="small" fullWidth label={`Dest. State${isFieldRequired('destination.state') ? '*' : ''}`} name="destinationState" value={formData.destinationState} onChange={handleInputChange} required={isFieldRequired('destination.state')} /></Grid>
@@ -233,16 +371,54 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Piece Count" name="pieceCount" type="number" value={formData.pieceCount} onChange={handleInputChange} /></Grid>
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Package Type" name="packageType" value={formData.packageType} onChange={handleInputChange} /></Grid>
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label={`Total Weight${isFieldRequired('totalWeight') ? '*' : ''}`} name="totalWeight" type="number" value={formData.totalWeight} onChange={handleInputChange} required={isFieldRequired('totalWeight')} /></Grid>
-            <Grid item xs={6} sm={3} md={2}><TextField size="small" select fullWidth label="Weight Unit" name="weightUnit" value={formData.weightUnit} onChange={(e) => handleSelectChange('weightUnit', e.target.value as any)}> {weightUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)} </TextField></Grid>
+            <Grid item xs={6} sm={3} md={2}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label="Weight Unit"
+                name="weightUnit"
+                value={weightUnitOptions.includes(formData.weightUnit) ? formData.weightUnit : ''}
+                onChange={(e) => handleSelectChange('weightUnit', e.target.value as any)}
+              >
+                {weightUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)}
+              </TextField>
+            </Grid>
             <Grid item xs={12} sm={4} md={2}><TextField size="small" fullWidth label="Equip. Length" name="equipmentLength" type="number" value={formData.equipmentLength} onChange={handleInputChange} /></Grid>
-            <Grid item xs={12} sm={4} md={2}><TextField size="small" select fullWidth label="Equip. Unit" name="equipmentUnit" value={formData.equipmentUnit} onChange={(e) => handleSelectChange('equipmentUnit', e.target.value as any)}> {equipmentUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)} </TextField></Grid>
+            <Grid item xs={12} sm={4} md={2}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label="Equip. Unit"
+                name="equipmentUnit"
+                value={equipmentUnitOptions.includes(formData.equipmentUnit) ? formData.equipmentUnit : ''}
+                onChange={(e) => handleSelectChange('equipmentUnit', e.target.value as any)}
+              >
+                {equipmentUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)}
+              </TextField>
+            </Grid>
             <Grid item xs={12} sm={4} md={2}><FormControlLabel control={<Checkbox checked={formData.isHazardous} onChange={handleInputChange} name="isHazardous" size="small" />} label="Hazardous" /></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="UN Number" name="unNumber" value={formData.unNumber} onChange={handleInputChange} disabled={!formData.isHazardous} /></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Hazmat Class" name="hazmatClass" value={formData.hazmatClass} onChange={handleInputChange} disabled={!formData.isHazardous} /></Grid>
             <Grid item xs={12} sm={4} md={2}><FormControlLabel control={<Checkbox checked={formData.isTemperatureControlled} onChange={handleInputChange} name="isTemperatureControlled" size="small" />} label="Temp Control" /></Grid>
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Min Temp" name="temperatureMin" type="number" value={formData.temperatureMin} onChange={handleInputChange} disabled={!formData.isTemperatureControlled} /></Grid>
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Max Temp" name="temperatureMax" type="number" value={formData.temperatureMax} onChange={handleInputChange} disabled={!formData.isTemperatureControlled} /></Grid>
-            <Grid item xs={12} sm={4} md={2}><TextField size="small" select fullWidth label="Temp Unit" name="tempUnit" value={formData.tempUnit} onChange={(e) => handleSelectChange('tempUnit', e.target.value as any)} disabled={!formData.isTemperatureControlled} > <MenuItem value="C">°C</MenuItem><MenuItem value="F">°F</MenuItem> </TextField></Grid>
+            <Grid item xs={12} sm={4} md={2}>
+              <TextField
+                size="small"
+                select
+                fullWidth
+                label="Temp Unit"
+                name="tempUnit"
+                value={['C', 'F'].includes(formData.tempUnit) ? formData.tempUnit : ''}
+                onChange={(e) => handleSelectChange('tempUnit', e.target.value as any)}
+                disabled={!formData.isTemperatureControlled}
+              >
+                <MenuItem value="C">°C</MenuItem>
+                <MenuItem value="F">°F</MenuItem>
+              </TextField>
+            </Grid>
 
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Reference Numbers</Typography><Divider/></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label={`BOL #${isFieldRequired('billOfLadingNumber') ? '*' : ''}`} name="billOfLadingNumber" value={formData.billOfLadingNumber} onChange={handleInputChange} required={isFieldRequired('billOfLadingNumber')} /></Grid>

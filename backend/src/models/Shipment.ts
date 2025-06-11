@@ -6,14 +6,53 @@ import { ApplicationSettings, IQuoteFormSettings } from './ApplicationSettings';
 
 const nanoidTms = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 8);
 
-// Define ModeOfTransportType locally for the model
+export interface IStop {
+  stopType: 'Pickup' | 'Dropoff' | 'Port' | 'Rail Ramp' | 'Other';
+  name?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+  locationType?: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  notes?: string;
+  appointmentRequired?: boolean;
+  scheduledDateTime?: Date;
+  actualDateTime?: Date;
+  appointmentNumber?: string;
+  isLaneOrigin?: boolean;
+  isLaneDestination?: boolean;
+}
+
+const stopSchema = new Schema<IStop>({
+  stopType: { type: String, enum: ['Pickup', 'Dropoff', 'Port', 'Rail Ramp', 'Other'], required: true },
+  name: { type: String, trim: true },
+  address: { type: String, trim: true },
+  city: { type: String, trim: true },
+  state: { type: String, trim: true },
+  zip: { type: String, trim: true },
+  country: { type: String, trim: true, default: 'USA' },
+  locationType: { type: String, enum: ['shipper_facility', 'port_terminal', 'rail_ramp', 'airport_cargo', 'warehouse', 'consignee_facility', 'other'], trim: true },
+  contactName: { type: String, trim: true },
+  contactPhone: { type: String, trim: true },
+  contactEmail: { type: String, trim: true, lowercase: true },
+  notes: { type: String, trim: true },
+  appointmentRequired: { type: Boolean, default: false },
+  scheduledDateTime: { type: Date },
+  actualDateTime: { type: Date },
+  appointmentNumber: { type: String, trim: true },
+  isLaneOrigin: { type: Boolean, default: false },
+  isLaneDestination: { type: Boolean, default: false },
+}, { _id: true }); // Use _id for array keying on the frontend
+
+
 export type ModeOfTransportType = // EXPORTED
     | 'truckload-ftl' | 'truckload-ltl'
     | 'drayage-import' | 'drayage-export'
-    | 'intermodal-rail'
-    | 'ocean-fcl' | 'ocean-lcl'
-    | 'air-freight'
-    | 'expedited-ground' | 'final-mile' | 'other';
+    | 'final-mile' | 'other';
 
 export type ShipmentStatusType = // EXPORTED
     | 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up'
@@ -99,8 +138,9 @@ export interface IShipment extends Document { // EXPORTED
   isTransload?: boolean;
   transloadFacility?: { name?: string; address?: string; city?: string; state?: string; zip?: string; };
   transloadDate?: Date;
-  origin: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
-  destination: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
+  stops: IStop[];
+  //origin: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
+  //destination: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
   scheduledPickupDate?: Date;
   scheduledDeliveryDate?: Date;
   scheduledPickupTime?: string;
@@ -162,12 +202,12 @@ const locationSchema = new Schema({
 
 const modeOfTransportEnumValues: ModeOfTransportType[] = [
     'truckload-ftl', 'truckload-ltl', 'drayage-import', 'drayage-export',
-    'intermodal-rail', 'ocean-fcl', 'ocean-lcl', 'air-freight',
-    'expedited-ground', 'final-mile', 'other'
+    'final-mile', 'other'
 ];
 
 const statusEnumValues: ShipmentStatusType[] = [
-    'quote', 'booked', 'dispatched', 'at_pickup', 'picked_up',
+    'quote', 'quote_sent', 'negotiating', 'awaiting_approval', 'approved', 'rejected', 'expired',
+    'booked', 'dispatched', 'at_pickup', 'picked_up',
     'in_transit_origin_drayage', 'at_origin_port_ramp', 'in_transit_main_leg',
     'at_destination_port_ramp', 'in_transit_destination_drayage', 'at_delivery',
     'delivered', 'pod_received', 'invoiced', 'paid', 'cancelled', 'on_hold', 'problem'
@@ -223,8 +263,9 @@ const shipmentSchema = new Schema<IShipment>({
   isTransload: { type: Boolean, default: false },
   transloadFacility: { name: String, address: String, city: String, state: String, zip: String },
   transloadDate: Date,
-  origin: { type: locationSchema, required: false },
-  destination: { type: locationSchema, required: false },
+  stops: { type: [stopSchema], default: [] },
+  //origin: { type: locationSchema, required: false },
+  //destination: { type: locationSchema, required: false },
   scheduledPickupDate: { type: Date, index: true },
   scheduledDeliveryDate: { type: Date, index: true },
   scheduledPickupTime: { type: String, trim: true },
@@ -271,7 +312,20 @@ const shipmentSchema = new Schema<IShipment>({
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true },
+});
+
+shipmentSchema.virtual('origin').get(function() {
+  if (!this.stops || this.stops.length === 0) return undefined;
+  return this.stops.find(s => s.isLaneOrigin) || this.stops.find(s => s.stopType === 'Pickup' || s.stopType === 'Port');
+});
+
+// This finds the last dropoff-type stop and treats it as the "destination"
+shipmentSchema.virtual('destination').get(function() {
+  if (!this.stops || this.stops.length === 0) return undefined;
+  return [...this.stops].reverse().find(s => s.isLaneDestination) || [...this.stops].reverse().find(s => s.stopType === 'Dropoff');
 });
 
 const modelDefaultQuoteFormSettings: IQuoteFormSettings = {
@@ -279,7 +333,6 @@ const modelDefaultQuoteFormSettings: IQuoteFormSettings = {
     quoteNumberPrefix: 'QT-',
     quoteNumberNextSequence: 1000, // Placeholder
 };
-
 
 shipmentSchema.pre<IShipment>('save', async function(next) {
   if (this.isNew && (!this.shipmentNumber || this.shipmentNumber.trim() === '')) {

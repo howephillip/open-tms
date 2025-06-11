@@ -13,6 +13,7 @@ import ShipmentsTable from './components/ShipmentsTable';
 import CheckInDialog from './components/CheckInDialog';
 import EmailGenDialog from './components/EmailGenDialog';
 import { mapShipmentToShipmentFormData, initialShipmentFormData } from './utils/shipmentFormMappers';
+import { quoteStatusOptions } from './constants/shipmentOptions';
 
 export interface Shipment {
   _id: string; shipmentNumber?: string; shipper: any; carrier: any;
@@ -53,7 +54,7 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
     () => shipmentAPI.getAll({ 
       limit: 100, 
       sort: '-createdAt', 
-      statusesNotIn: 'quote',
+      statusesNotIn: quoteStatusOptions.join(','),
       ...(debouncedSearchTerm && { searchTerm: debouncedSearchTerm })
     }), { keepPreviousData: true });
   
