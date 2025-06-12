@@ -55,6 +55,13 @@ const formatFileSize = (bytes: number = 0): string => {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sz[i]}`; 
 };
 
+// Helper for automatic weight unit conversion
+const convertWeight = (value: number, fromUnit: string): number => {
+  if (fromUnit === 'KG') return +(value * 2.20462).toFixed(2);
+  if (fromUnit === 'LBS') return +(value / 2.20462).toFixed(2);
+  return value;
+};
+
 const getFieldValue = (obj: any, path: string) => {
   return path.split('.').reduce((acc, part) => acc && acc[part], obj);
 };
@@ -739,19 +746,38 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label={`Commodity Description${isFieldRequired('commodityDescription') ? '*' : ''}`} name="commodityDescription" value={formData.commodityDescription} onChange={handleInputChange} required={isFieldRequired('commodityDescription')} /></Grid>
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Piece Count" name="pieceCount" type="number" value={formData.pieceCount} onChange={handleInputChange} /></Grid>
             <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label="Package Type" name="packageType" value={formData.packageType} onChange={handleInputChange} /></Grid>
-            <Grid item xs={6} sm={3} md={2}><TextField size="small" fullWidth label={`Total Weight${isFieldRequired('totalWeight') ? '*' : ''}`} name="totalWeight" type="number" value={formData.totalWeight} onChange={handleInputChange} required={isFieldRequired('totalWeight')} /></Grid>
-            <Grid item xs={6} sm={3} md={2}>
-              <TextField
-                size="small"
-                select
-                fullWidth
-                label="Weight Unit"
-                name="weightUnit"
-                value={weightUnitOptions.includes(formData.weightUnit) ? formData.weightUnit : ''}
-                onChange={(e) => handleSelectChange('weightUnit', e.target.value as any)}
-              >
-                {weightUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)}
-              </TextField>
+            <Grid item xs={12} sm={6} md={4}>
+              <Box display="flex" alignItems="center" gap={1} width="100%">
+                <TextField
+                  size="small"
+                  fullWidth
+                  label={`Total Weight${isFieldRequired('totalWeight') ? '*' : ''}`}
+                  name="totalWeight"
+                  type="number"
+                  value={formData.totalWeight}
+                  onChange={handleInputChange}
+                  required={isFieldRequired('totalWeight')}
+                />
+                <TextField
+                  size="small"
+                  select
+                  sx={{ minWidth: 80 }}
+                  label="Unit"
+                  name="weightUnit"
+                  value={weightUnitOptions.includes(formData.weightUnit) ? formData.weightUnit : ''}
+                  onChange={(e) => handleSelectChange('weightUnit', e.target.value as any)}
+                >
+                  {weightUnitOptions.map(u => <MenuItem key={u} value={u}>{u}</MenuItem>)}
+                </TextField>
+                {formData.totalWeight && formData.weightUnit && (
+                  <Typography variant="caption" sx={{ whiteSpace: 'nowrap', ml: 1 }}>
+                    ≈{" "}
+                    {formData.weightUnit === 'KG'
+                      ? `${convertWeight(Number(formData.totalWeight), 'KG')} lbs`
+                      : `${convertWeight(Number(formData.totalWeight), 'LBS')} kg`}
+                  </Typography>
+                )}
+              </Box>
             </Grid>
             <Grid item xs={12} sm={4} md={2}><TextField size="small" fullWidth label="Equip. Length" name="equipmentLength" type="number" value={formData.equipmentLength} onChange={handleInputChange} /></Grid>
             <Grid item xs={12} sm={4} md={2}>
@@ -792,6 +818,27 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Reference Numbers</Typography><Divider/></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label={`BOL #${isFieldRequired('billOfLadingNumber') ? '*' : ''}`} name="billOfLadingNumber" value={formData.billOfLadingNumber} onChange={handleInputChange} required={isFieldRequired('billOfLadingNumber')} /></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label={`PRO #${isFieldRequired('proNumber') ? '*' : ''}`} name="proNumber" value={formData.proNumber} onChange={handleInputChange} required={isFieldRequired('proNumber')} /></Grid>
+            {/* Container Details fields moved here */}
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField size="small" fullWidth label="Container #" name="containerNumber" value={formData.containerNumber} onChange={handleInputChange} />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField size="small" fullWidth label="Pickup #" name="pickupNumber" value={formData.pickupNumber} onChange={handleInputChange} />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField size="small" fullWidth label="Seal #" name="sealNumber" value={formData.sealNumber} onChange={handleInputChange} />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Steamship Line"
+                name="steamshipLine"
+                value={formData.steamshipLine}
+                onChange={handleInputChange}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="DO #" name="deliveryOrderNumber" value={formData.deliveryOrderNumber} onChange={handleInputChange} /></Grid>
             <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Booking #" name="bookingNumber" value={formData.bookingNumber} onChange={handleInputChange} /></Grid>
             
