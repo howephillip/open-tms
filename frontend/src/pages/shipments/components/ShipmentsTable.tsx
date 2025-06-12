@@ -12,37 +12,14 @@ import { Link as RouterLink } from 'react-router-dom';
 import StatusUpdateSelect from '../../../components/common/StatusUpdateSelect';
 import { quoteStatusOptions, shipmentStatusOptions } from '../constants/shipmentOptions';
 
+const formatDate = (dateString?: string): string => {
+  if (!dateString) return 'N/A';
+  const date = new Date(dateString);
+  return new Date(date.getTime() + Math.abs(date.getTimezoneOffset() * 60000))
+    .toLocaleDateString();
+};
 
-interface ShipmentRowData {
-  _id: string;
-  shipmentNumber?: string;
-  modeOfTransport?: string;
-  shipper?: { _id: string; name?: string; } | string | null;
-  carrier?: { _id: string; name?: string; } | string | null;
-  origin?: { city?: string; state?: string; };
-  destination?: { city?: string; state?: string; };
-  status?: string;
-  scheduledPickupDate?: string;
-  scheduledDeliveryDate?: string;
-  containerNumber?: string;
-  proNumber?: string;
-  customerRate?: number;
-  totalCustomerRate?: number;
-}
-
-interface ShipmentsTableProps {
-  items: ShipmentRowData[];
-  isLoading: boolean;
-  activeTab: 'shipments' | 'quotes';
-  onEditItem: (item: ShipmentRowData) => void;
-  onViewDetails: (item: ShipmentRowData) => void;
-  onAddCheckIn: (item: ShipmentRowData) => void;
-  onGenerateEmail: (item: ShipmentRowData) => void;
-  onDeleteItem: (item: ShipmentRowData) => void;
-  getDisplayName: (entity: any) => string;
-}
-
-const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
+const ShipmentsTable = ({
   items, isLoading, activeTab,
   onEditItem, onViewDetails, onAddCheckIn, onGenerateEmail,
   onDeleteItem, getDisplayName
@@ -79,7 +56,17 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
                 <TableCell sx={{textTransform: 'capitalize'}}>{item.modeOfTransport?.replace(/-/g, ' ') || 'N/A'}</TableCell>
                 <TableCell>{getDisplayName(item.shipper)}</TableCell>
                 <TableCell>{getDisplayName(item.carrier)}</TableCell>
-                <TableCell>{`${(item as any).originCity || 'N/A'}, ${(item as any).originState || ''}`} → {`${(item as any).destinationCity || 'N/A'}, ${(item as any).destinationState || ''}`}</TableCell>
+                <TableCell>
+                  {item?.origin?.city || item?.origin?.state || item?.stops?.[0]
+                    ? `${item.origin?.city || item.stops?.[0]?.city || ''}${(item.origin?.city || item.stops?.[0]?.city) && (item.origin?.state || item.stops?.[0]?.state) ? ', ' : ''}${item.origin?.state || item.stops?.[0]?.state || ''}`
+                    : 'N/A'
+                  }
+                  →
+                  {item?.destination?.city || item?.destination?.state || item?.stops?.[1]
+                    ? `${item.destination?.city || item.stops?.[1]?.city || ''}${(item.destination?.city || item.stops?.[1]?.city) && (item.destination?.state || item.stops?.[1]?.state) ? ', ' : ''}${item.destination?.state || item.stops?.[1]?.state || ''}`
+                    : 'N/A'
+                  }
+                </TableCell>
                 
                 <TableCell>
                   <StatusUpdateSelect
@@ -90,8 +77,8 @@ const ShipmentsTable: React.FC<ShipmentsTableProps> = ({
                   />
                 </TableCell>
                 
-                <TableCell>{item.scheduledPickupDate ? new Date(item.scheduledPickupDate).toLocaleDateString() : 'N/A'}</TableCell>
-                <TableCell>{item.scheduledDeliveryDate ? new Date(item.scheduledDeliveryDate).toLocaleDateString() : 'N/A'}</TableCell>
+                <TableCell>{formatDate(item.scheduledPickupDate)}</TableCell>
+                <TableCell>{formatDate(item.scheduledDeliveryDate)}</TableCell>
                 <TableCell>
                   {activeTab === 'quotes' 
                     ? `$${(item.totalCustomerRate ?? item.customerRate)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || 'N/A'}` 

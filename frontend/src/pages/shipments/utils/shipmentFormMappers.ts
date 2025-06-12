@@ -17,6 +17,7 @@ export interface IStop {
   notes?: string;
   scheduledDateTime?: string; // Stored as string for datetime-local input
   appointmentNumber?: string;
+  actualDateTime?: string; // Add this for completeness
 }
 
 // Helper functions for date formatting
@@ -34,11 +35,10 @@ export const initialShipmentFormData: ShipmentFormDataForDialog = {
   _id: undefined, shipmentNumber: '', shipper: '', carrier: '',
   modeOfTransport: 'truckload-ftl', 
   status: 'booked',
-  stops: [ // Default to one pickup and one dropoff
+  stops: [
     { stopType: 'Pickup', city: '', state: '', zip: '' },
     { stopType: 'Dropoff', city: '', state: '', zip: '' },
   ],
-  // All other fields remain
   billOfLadingNumber: '', proNumber: '', deliveryOrderNumber: '', bookingNumber: '',
   containerNumber: '', sealNumber: '', pickupNumber: '', proofOfDeliveryNumber: '',
   purchaseOrderNumbers: '', otherReferenceNumbersString: '',
@@ -48,10 +48,8 @@ export const initialShipmentFormData: ShipmentFormDataForDialog = {
   temperatureMin: '', temperatureMax: '', tempUnit: 'C',
   customerRate: '', carrierCostTotal: '', internalNotes: '', specialInstructions: '', customTags: '',
   documentIds: [], attachedDocuments: [],
-  // Deprecated flat fields are gone
 };
 
-// --- UPDATED: initialQuoteFormData now uses a 'stops' array ---
 export const initialQuoteFormData: QuoteFormData = {
   status: 'quote', shipper: '', carrier: '', modeOfTransport: 'truckload-ftl', equipmentType: '',
   stops: [
@@ -65,40 +63,46 @@ export const initialQuoteFormData: QuoteFormData = {
   documentIds: [], attachedDocuments: [],
 };
 
-
-// --- UPDATED: mapShipmentToShipmentFormData now maps to 'stops' array ---
 export const mapShipmentToShipmentFormData = (shipment: Shipment): ShipmentFormDataForDialog => {
     return {
         _id: shipment._id,
-        // Map all top-level fields from shipment to the form data
         ...shipment,
-        shipper: typeof shipment.shipper === 'object' ? shipment.shipper?._id || '' : shipment.shipper || '',
-        carrier: typeof shipment.carrier === 'object' ? shipment.carrier?._id || '' : shipment.carrier || '',
-        
-        // Map the stops array, formatting dates correctly
-        stops: shipment.stops && shipment.stops.length > 0 
+        shipper: typeof shipment.shipper === 'object' ? shipment.shipper?._id ?? '' : shipment.shipper ?? '',
+        carrier: typeof shipment.carrier === 'object' ? shipment.carrier?._id ?? '' : shipment.carrier ?? '',
+        stops: Array.isArray(shipment.stops) && shipment.stops.length > 0
             ? shipment.stops.map((stop: any) => ({
                 ...stop,
-                scheduledDateTime: formatDateTimeForInput(stop.scheduledDateTime),
-                actualDateTime: formatDateTimeForInput(stop.actualDateTime),
-            })) 
+                scheduledDateTime:
+                  stop.scheduledDateTime != null && stop.scheduledDateTime !== undefined
+                    ? formatDateTimeForInput(stop.scheduledDateTime)
+                    : '',
+                actualDateTime:
+                  stop.actualDateTime != null && stop.actualDateTime !== undefined
+                    ? formatDateTimeForInput(stop.actualDateTime)
+                    : '',
+                name: stop.name ?? '',
+                address: stop.address ?? '',
+                city: stop.city ?? '',
+                state: stop.state ?? '',
+                zip: stop.zip ?? '',
+                country: stop.country ?? '',
+                locationType: stop.locationType ?? '',
+                contactName: stop.contactName ?? '',
+                contactPhone: stop.contactPhone ?? '',
+                contactEmail: stop.contactEmail ?? '',
+                notes: stop.notes ?? '',
+                appointmentNumber: stop.appointmentNumber ?? '',
+            }))
             : initialShipmentFormData.stops,
-
-        // Handle arrays of strings and objects
-        purchaseOrderNumbers: shipment.purchaseOrderNumbers?.join(', ') || '',
-        otherReferenceNumbersString: shipment.otherReferenceNumbers?.map(ref => `${ref.type}:${ref.value}`).join(', ') || '',
-        customTags: shipment.customTags?.join(', ') || '',
-
-        // Handle dates
+        purchaseOrderNumbers: shipment.purchaseOrderNumbers?.join(', ') ?? '',
+        otherReferenceNumbersString: shipment.otherReferenceNumbers?.map(ref => `${ref.type}:${ref.value}`).join(', ') ?? '',
+        customTags: shipment.customTags?.join(', ') ?? '',
         quoteValidUntil: formatDateForInput(shipment.quoteValidUntil),
-        
-        // Handle documents
-        documentIds: shipment.documents?.map(doc => typeof doc === 'string' ? doc : doc._id) || [],
-        attachedDocuments: shipment.documents?.filter(doc => typeof doc !== 'string') || []
+        documentIds: shipment.documents?.map(doc => typeof doc === 'string' ? doc : doc._id) ?? [],
+        attachedDocuments: shipment.documents?.filter(doc => typeof doc !== 'string') ?? []
     };
 };
 
-// --- UPDATED: mapShipmentToQuoteFormData now maps to 'stops' array ---
 export const mapShipmentToQuoteFormData = (shipment: Shipment): QuoteFormData => {
     const mappedData = mapShipmentToShipmentFormData(shipment);
     return {
@@ -112,6 +116,6 @@ export const mapShipmentToQuoteFormData = (shipment: Shipment): QuoteFormData =>
             customerRate: acc.customerRate || 0,
             carrierCost: acc.carrierCost || 0,
             notes: acc.notes || ''
-        })) || [],
+        })) ?? [],
     };
 };

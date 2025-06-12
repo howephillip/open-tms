@@ -272,6 +272,14 @@ export class ShipmentController {
         // Apply all direct fields from updateData to the Mongoose document
         Object.assign(shipmentToUpdate, updateData);
 
+        // Clear actual date fields if not provided (user cleared them in UI)
+        const actualFields = ['actualPickupDate', 'actualPickupTime', 'actualDeliveryDate', 'actualDeliveryTime'];
+        actualFields.forEach(field => {
+          if (!updateData.hasOwnProperty(field)) {
+            (shipmentToUpdate as any)[field] = undefined;
+          }
+        });
+
         // Explicitly handle the new 'stops' array if it exists
         if (updateData.stops && Array.isArray(updateData.stops)) {
             shipmentToUpdate.stops = updateData.stops;

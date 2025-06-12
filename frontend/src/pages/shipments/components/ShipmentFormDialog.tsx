@@ -81,7 +81,36 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
   useEffect(() => {
     if (open) {
       if (initialData) {
-        setFormData({ ...dialogInitialShipmentFormData, ...initialData, documentIds: initialData.documentIds || [], attachedDocuments: initialData.attachedDocuments || [] });
+        const documentIds = initialData.documentIds || [];
+        const attachedDocuments = initialData.attachedDocuments || [];
+        // Extract Pickup and Dropoff stops
+        const pickupStop = initialData?.stops?.find((s: any) => s.stopType === 'Pickup') || {};
+        const dropoffStop = initialData?.stops?.find((s: any) => s.stopType === 'Dropoff') || {};
+
+        setFormData((prev) => ({
+          ...prev,
+          ...initialData,
+          originAddress: pickupStop.address || '',
+          originCity: pickupStop.city || '',
+          originState: pickupStop.state || '',
+          originZip: pickupStop.zip || '',
+          originCountry: pickupStop.country || '',
+          originName: pickupStop?.name ?? '',
+          originNotes: pickupStop.notes || '',
+          originContactName: pickupStop.contactName || '',
+          originContactPhone: pickupStop.contactPhone || '',
+          originLocationType: pickupStop.stopType || '',
+          destinationAddress: dropoffStop.address || '',
+          destinationCity: dropoffStop.city || '',
+          destinationState: dropoffStop.state || '',
+          destinationZip: dropoffStop.zip || '',
+          destinationCountry: dropoffStop.country || '',
+          destinationName: dropoffStop?.name ?? '',
+          destinationNotes: dropoffStop.notes || '',
+          destinationContactName: dropoffStop.contactName || '',
+          destinationContactPhone: dropoffStop.contactPhone || '',
+          destinationLocationType: dropoffStop.stopType || ''
+        }));
       } else {
         setFormData({
           ...dialogInitialShipmentFormData,
@@ -97,8 +126,13 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
 
   const handleInputChange = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const target = event.target;
-    const value = target.type === 'checkbox' ? (target as HTMLInputElement).checked : target.value;
     const name = target.name;
+    let value = target.type === 'checkbox' ? (target as HTMLInputElement).checked : target.value;
+
+    if (target.type === 'date') {
+      value = value || ''; // Allow clearing of date fields
+    }
+
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
@@ -151,22 +185,60 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
 
   const handleSubmit = () => {
     if (!shipmentSettings) {
-        toast.error("Shipment form settings are not loaded yet. Please wait a moment and try again.");
-        return;
+      toast.error("Shipment form settings are not loaded yet. Please wait a moment and try again.");
+      return;
     }
 
     const missingFields: string[] = [];
     shipmentSettings.requiredFields.forEach(fieldId => {
-        const value = getFieldValue(formData, fieldId);
-        if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
-            missingFields.push(fieldId);
-        }
+      const value = getFieldValue(formData, fieldId);
+      if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+        missingFields.push(fieldId);
+      }
     });
 
     if (missingFields.length > 0) {
-        toast.error(`Please fill in all required fields: ${missingFields.join(', ')}.`);
-        return;
+      toast.error(`Please fill in all required fields: ${missingFields.join(', ')}.`);
+      return;
     }
+
+    // --- Construct stops array based on location data before submit
+    const stops = [];
+
+    if (formData.originAddress || formData.originCity || formData.originState || formData.originZip) {
+      stops.push({
+        stopType: formData.originLocationType || 'Pickup',
+        name: formData.originName,
+        address: formData.originAddress,
+        city: formData.originCity,
+        state: formData.originState,
+        zip: formData.originZip,
+        country: formData.originCountry,
+        contactName: formData.originContactName,
+        contactPhone: formData.originContactPhone,
+        notes: formData.originNotes
+      });
+    }
+
+    if (formData.destinationAddress || formData.destinationCity || formData.destinationState || formData.destinationZip) {
+      stops.push({
+        stopType: formData.destinationLocationType || 'Dropoff',
+        name: formData.destinationName,
+        address: formData.destinationAddress,
+        city: formData.destinationCity,
+        state: formData.destinationState,
+        zip: formData.destinationZip,
+        country: formData.destinationCountry,
+        contactName: formData.destinationContactName,
+        contactPhone: formData.destinationContactPhone,
+        notes: formData.destinationNotes
+      });
+    }
+
+    formData.stops = stops;
+    // ---
+
+
     onSubmit(formData, formData._id);
   };
 
@@ -300,70 +372,367 @@ const ShipmentFormDialog: React.FC<ShipmentFormDialogProps> = ({
             
             {/* Section 2: Dates & Times */}
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Dates & Times</Typography><Divider/></Grid>
-            <Grid item xs={6} sm={4} md={2}><TextField size="small" fullWidth label={`Sched. Pickup Date${isFieldRequired('scheduledPickupDate') ? '*' : ''}`} name="scheduledPickupDate" type="date" value={formData.scheduledPickupDate} onChange={handleInputChange} InputLabelProps={{ shrink: true }} required={isFieldRequired('scheduledPickupDate')} /></Grid>
-            <Grid item xs={6} sm={2} md={1}><TextField size="small" fullWidth label="Time" name="scheduledPickupTime" value={formData.scheduledPickupTime} onChange={handleInputChange} placeholder="HH:MM" /></Grid>
-            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Actual Pickup D/T" name="actualPickupDateTime" type="datetime-local" value={formData.actualPickupDateTime} onChange={handleInputChange} InputLabelProps={{ shrink: true }} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><TextField size="small" fullWidth label={`Sched. Delivery Date${isFieldRequired('scheduledDeliveryDate') ? '*' : ''}`} name="scheduledDeliveryDate" type="date" value={formData.scheduledDeliveryDate} onChange={handleInputChange} InputLabelProps={{ shrink: true }} required={isFieldRequired('scheduledDeliveryDate')} /></Grid>
-            <Grid item xs={6} sm={2} md={1}><TextField size="small" fullWidth label="Time" name="scheduledDeliveryTime" value={formData.scheduledDeliveryTime} onChange={handleInputChange} placeholder="HH:MM" /></Grid>
-            <Grid item xs={12} sm={6} md={3}><TextField size="small" fullWidth label="Actual Delivery D/T" name="actualDeliveryDateTime" type="datetime-local" value={formData.actualDeliveryDateTime} onChange={handleInputChange} InputLabelProps={{ shrink: true }} /></Grid>
+            <Grid item xs={6} sm={4} md={2}>
+              <TextField
+                size="small"
+                fullWidth
+                label={`Sched. Pickup Date${isFieldRequired('scheduledPickupDate') ? '*' : ''}`}
+                name="scheduledPickupDate"
+                type="date"
+                value={formData.scheduledPickupDate ? new Date(formData.scheduledPickupDate).toISOString().split('T')[0] : ''}
+                onChange={handleInputChange}
+                InputLabelProps={{ shrink: true }}
+                required={isFieldRequired('scheduledPickupDate')}
+              />
+            </Grid>
+            <Grid item xs={6} sm={2} md={1}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Time"
+                name="scheduledPickupTime"
+                value={formData.scheduledPickupTime || ''}
+                onChange={handleInputChange}
+                placeholder="HH:MM"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Actual Pickup D/T"
+                name="actualPickupDateTime"
+                type="datetime-local"
+                value={
+                  formData.actualPickupDateTime && !isNaN(new Date(formData.actualPickupDateTime).getTime())
+                    ? new Date(formData.actualPickupDateTime).toISOString().slice(0, 16)
+                    : ''
+                }
+                onChange={(e) => handleInputChange(e)}
+                InputLabelProps={{ shrink: true }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  console.log("Clearing actualPickupDateTime. Current value:", formData.actualPickupDateTime);
+                  setFormData(prev => ({ ...prev, actualPickupDateTime: '' }));
+                  setTimeout(() => {
+                    console.log("Value after clearing:", formData.actualPickupDateTime);
+                  }, 100);
+                }}
+                sx={{ mt: 1 }}
+              >
+                Clear Pickup
+              </Button>
+            </Grid>
+            <Grid item xs={6} sm={4} md={2}>
+              <TextField
+                size="small"
+                fullWidth
+                label={`Sched. Delivery Date${isFieldRequired('scheduledDeliveryDate') ? '*' : ''}`}
+                name="scheduledDeliveryDate"
+                type="date"
+                value={formData.scheduledDeliveryDate ? new Date(formData.scheduledDeliveryDate).toISOString().split('T')[0] : ''}
+                onChange={handleInputChange}
+                InputLabelProps={{ shrink: true }}
+                required={isFieldRequired('scheduledDeliveryDate')}
+              />
+            </Grid>
+            <Grid item xs={6} sm={2} md={1}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Time"
+                name="scheduledDeliveryTime"
+                value={formData.scheduledDeliveryTime || ''}
+                onChange={handleInputChange}
+                placeholder="HH:MM"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <TextField
+                size="small"
+                fullWidth
+                label="Actual Delivery D/T"
+                name="actualDeliveryDateTime"
+                type="datetime-local"
+                value={
+                  formData.actualDeliveryDateTime && !isNaN(new Date(formData.actualDeliveryDateTime).getTime())
+                    ? new Date(formData.actualDeliveryDateTime).toISOString().slice(0, 16)
+                    : ''
+                }
+                key={formData.actualDeliveryDateTime || 'empty'}
+                onChange={(e) => handleInputChange(e)}
+                InputLabelProps={{ shrink: true }}
+              />
+              <Button
+                size="small"
+                variant="outlined"
+                onClick={() => {
+                  setFormData(prev => ({ ...prev, actualDeliveryDateTime: '' }));
+                  setTimeout(() => {
+                    const el = document.querySelector('input[name="actualDeliveryDateTime"]') as HTMLInputElement;
+                    if (el) el.value = '';
+                  }, 0);
+                }}
+                sx={{ mt: 1 }}
+              >
+                Clear Delivery
+              </Button>
+            </Grid>
             
             {/* Section 3: Locations */}
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Locations</Typography><Divider/></Grid>
             <Grid item xs={12} md={6}> <Typography variant="caption" display="block" gutterBottom>Origin Details</Typography> <Grid container spacing={1}>
-                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Name" name="originName" value={formData.originName} onChange={handleInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Origin Name"
+                        name="originName"
+                        value={formData.originName}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
                     <Grid item xs={12} sm={6}>
                       <TextField
                         size="small"
                         select
                         fullWidth
-                        label="Origin Location Type"
+                        label="Origin Stop Type"
                         name="originLocationType"
-                        value={locationTypeOptions.includes(formData.originLocationType) ? formData.originLocationType : ''}
+                        value={formData.originLocationType ?? ''}
                         onChange={(e) => handleSelectChange('originLocationType', e.target.value as any)}
                       >
-                        {locationTypeOptions.map(lt => (
-                          <MenuItem key={`orig-${lt}`} value={lt} sx={{ textTransform: 'capitalize' }}>
-                            {lt.replace(/_/g, ' ')}
+                        {['Pickup', 'Dropoff'].map(lt => (
+                          <MenuItem key={`orig-${lt}`} value={lt}>
+                            {lt}
                           </MenuItem>
                         ))}
                       </TextField>
                     </Grid>
-                    <Grid item xs={12}><TextField size="small" fullWidth label={`Origin Address${isFieldRequired('origin.address') ? '*' : ''}`} name="originAddress" value={formData.originAddress} onChange={handleInputChange} required={isFieldRequired('origin.address')} /></Grid>
-                    <Grid item xs={12} sm={4}><TextField size="small" fullWidth label={`Origin City${isFieldRequired('origin.city') ? '*' : ''}`} name="originCity" value={formData.originCity} onChange={handleInputChange} required={isFieldRequired('origin.city')} /></Grid>
-                    <Grid item xs={12} sm={2}><TextField size="small" fullWidth label={`Origin State${isFieldRequired('origin.state') ? '*' : ''}`} name="originState" value={formData.originState} onChange={handleInputChange} required={isFieldRequired('origin.state')} /></Grid>
-                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label={`Origin Zip${isFieldRequired('origin.zip') ? '*' : ''}`} name="originZip" value={formData.originZip} onChange={handleInputChange} required={isFieldRequired('origin.zip')} /></Grid>
-                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label="Origin Country" name="originCountry" value={formData.originCountry} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Contact Name" name="originContactName" value={formData.originContactName} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Origin Contact Phone" name="originContactPhone" value={formData.originContactPhone} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12}><TextField size="small" fullWidth label="Origin Notes" name="originNotes" value={formData.originNotes} onChange={handleInputChange} multiline minRows={1}/> </Grid>
+                    <Grid item xs={12}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Origin Address${isFieldRequired('origin.address') ? '*' : ''}`}
+                        name="originAddress"
+                        value={formData.originAddress}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('origin.address')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Origin City${isFieldRequired('origin.city') ? '*' : ''}`}
+                        name="originCity"
+                        value={formData.originCity}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('origin.city')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={2}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Origin State${isFieldRequired('origin.state') ? '*' : ''}`}
+                        name="originState"
+                        value={formData.originState}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('origin.state')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Origin Zip${isFieldRequired('origin.zip') ? '*' : ''}`}
+                        name="originZip"
+                        value={formData.originZip}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('origin.zip')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Origin Country"
+                        name="originCountry"
+                        value={formData.originCountry}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Origin Contact Name"
+                        name="originContactName"
+                        value={formData.originContactName}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Origin Contact Phone"
+                        name="originContactPhone"
+                        value={formData.originContactPhone}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Origin Notes"
+                        name="originNotes"
+                        value={formData.originNotes}
+                        onChange={handleInputChange}
+                        multiline
+                        minRows={1}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
                 </Grid></Grid>
             <Grid item xs={12} md={6}> <Typography variant="caption" display="block" gutterBottom>Destination Details</Typography> <Grid container spacing={1}>
-                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Name" name="destinationName" value={formData.destinationName} onChange={handleInputChange} /></Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Dest. Name"
+                        name="destinationName"
+                        value={formData.destinationName}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
                     <Grid item xs={12} sm={6}>
                       <TextField
                         size="small"
                         select
                         fullWidth
-                        label="Dest. Location Type"
+                        label="Dest. Stop Type"
                         name="destinationLocationType"
-                        value={locationTypeOptions.includes(formData.destinationLocationType) ? formData.destinationLocationType : ''}
+                        value={formData.destinationLocationType ?? ''}
                         onChange={(e) => handleSelectChange('destinationLocationType', e.target.value as any)}
                       >
-                        {locationTypeOptions.map(lt => (
-                          <MenuItem key={`dest-${lt}`} value={lt} sx={{ textTransform: 'capitalize' }}>
-                            {lt.replace(/_/g, ' ')}
+                        {['Pickup', 'Dropoff'].map(lt => (
+                          <MenuItem key={`dest-${lt}`} value={lt}>
+                            {lt}
                           </MenuItem>
                         ))}
                       </TextField>
                     </Grid>
-                    <Grid item xs={12}><TextField size="small" fullWidth label={`Dest. Address${isFieldRequired('destination.address') ? '*' : ''}`} name="destinationAddress" value={formData.destinationAddress} onChange={handleInputChange} required={isFieldRequired('destination.address')} /></Grid>
-                    <Grid item xs={12} sm={4}><TextField size="small" fullWidth label={`Dest. City${isFieldRequired('destination.city') ? '*' : ''}`} name="destinationCity" value={formData.destinationCity} onChange={handleInputChange} required={isFieldRequired('destination.city')} /></Grid>
-                    <Grid item xs={12} sm={2}><TextField size="small" fullWidth label={`Dest. State${isFieldRequired('destination.state') ? '*' : ''}`} name="destinationState" value={formData.destinationState} onChange={handleInputChange} required={isFieldRequired('destination.state')} /></Grid>
-                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label={`Dest. Zip${isFieldRequired('destination.zip') ? '*' : ''}`} name="destinationZip" value={formData.destinationZip} onChange={handleInputChange} required={isFieldRequired('destination.zip')} /></Grid>
-                    <Grid item xs={12} sm={3}><TextField size="small" fullWidth label="Dest. Country" name="destinationCountry" value={formData.destinationCountry} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Contact Name" name="destinationContactName" value={formData.destinationContactName} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12} sm={6}><TextField size="small" fullWidth label="Dest. Contact Phone" name="destinationContactPhone" value={formData.destinationContactPhone} onChange={handleInputChange} /></Grid>
-                    <Grid item xs={12}><TextField size="small" fullWidth label="Dest. Notes" name="destinationNotes" value={formData.destinationNotes} onChange={handleInputChange} multiline minRows={1} /></Grid>
+                    <Grid item xs={12}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Dest. Address${isFieldRequired('destination.address') ? '*' : ''}`}
+                        name="destinationAddress"
+                        value={formData.destinationAddress}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('destination.address')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={4}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Dest. City${isFieldRequired('destination.city') ? '*' : ''}`}
+                        name="destinationCity"
+                        value={formData.destinationCity}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('destination.city')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={2}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Dest. State${isFieldRequired('destination.state') ? '*' : ''}`}
+                        name="destinationState"
+                        value={formData.destinationState}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('destination.state')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label={`Dest. Zip${isFieldRequired('destination.zip') ? '*' : ''}`}
+                        name="destinationZip"
+                        value={formData.destinationZip}
+                        onChange={handleInputChange}
+                        required={isFieldRequired('destination.zip')}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={3}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Dest. Country"
+                        name="destinationCountry"
+                        value={formData.destinationCountry}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Dest. Contact Name"
+                        name="destinationContactName"
+                        value={formData.destinationContactName}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Dest. Contact Phone"
+                        name="destinationContactPhone"
+                        value={formData.destinationContactPhone}
+                        onChange={handleInputChange}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12}>
+                      <TextField
+                        size="small"
+                        fullWidth
+                        label="Dest. Notes"
+                        name="destinationNotes"
+                        value={formData.destinationNotes}
+                        onChange={handleInputChange}
+                        multiline
+                        minRows={1}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
                 </Grid></Grid>
 
             <Grid item xs={12}><Typography variant="overline" sx={{mt:1.5}}>Freight Details</Typography><Divider/></Grid>

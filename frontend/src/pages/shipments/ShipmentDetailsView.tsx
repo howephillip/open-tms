@@ -163,6 +163,33 @@ const ShipmentDetailsView: React.FC = () => {
     );
   };
 
+  // --- Render Stops helper ---
+  const renderStops = () => {
+    if (shipment.stops && shipment.stops.length > 0) {
+      return shipment.stops.map((stop: any, idx: number) => {
+        const label =
+          idx === 0 ? 'Origin' :
+          idx === shipment.stops.length - 1 ? 'Destination' :
+          `Stop ${idx + 1}`;
+        return (
+          <Box key={stop._id || idx} mb={1}>
+            <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              <LocationOnIcon sx={{ mr: 0.5, fontSize: '1rem' }} color="action" />
+              {label}: {stop.city}, {stop.state}
+            </Typography>
+          </Box>
+        );
+      });
+    }
+    return (
+      <>
+        {renderLocation(shipment.origin, 'Origin')}
+        <Divider sx={{ my: 1 }} />
+        {renderLocation(shipment.destination, 'Destination')}
+      </>
+    );
+  };
+
   if (isLoading) return <Box sx={{p:3, display: 'flex', justifyContent: 'center'}}><CircularProgress /></Box>;
   if (isError) return <Alert severity="error">Error fetching shipment: {(error as any)?.response?.data?.message || (error as any)?.message}</Alert>;
   if (!shipment) return <Alert severity="warning">Shipment (ID: {shipmentId}) not found.</Alert>;
@@ -198,9 +225,7 @@ const ShipmentDetailsView: React.FC = () => {
                 </Paper>
                 <Paper variant="outlined" sx={{p:2, mb:2}}>
                     <Typography variant="h6" gutterBottom>Route & Timing</Typography>
-                    {renderLocation(shipment.origin, 'Origin')}
-                    <Divider sx={{my:1}}/>
-                    {renderLocation(shipment.destination, 'Destination')}
+                    {renderStops()}
                 </Paper>
             </Grid>
 
@@ -233,8 +258,11 @@ const ShipmentDetailsView: React.FC = () => {
                 </Paper>
                 <Paper variant="outlined" sx={{p:2, mb:2}}>
                     <Typography variant="h6" gutterBottom>Notes & Tags</Typography>
-                    {shipment.status === 'quote' && shipment.quoteNotes && 
-                        <Box mb={1}><Typography variant="subtitle2">Quote Notes:</Typography><Typography variant="body2" sx={{whiteSpace: 'pre-wrap'}}>{shipment.quoteNotes}</Typography></Box>
+                    {shipment.quoteNotes &&
+                        <Box mb={1}>
+                            <Typography variant="subtitle2">Quote Notes:</Typography>
+                            <Typography variant="body2" sx={{whiteSpace: 'pre-wrap'}}>{shipment.quoteNotes}</Typography>
+                        </Box>
                     }
                     {shipment.internalNotes && 
                         <Box mb={1}><Typography variant="subtitle2">Internal Notes:</Typography><Typography variant="body2" sx={{whiteSpace: 'pre-wrap'}}>{shipment.internalNotes}</Typography></Box>

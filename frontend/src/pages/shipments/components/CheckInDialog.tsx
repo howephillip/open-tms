@@ -4,6 +4,8 @@ import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Grid, TextFi
 import { toast } from 'react-toastify';
 import { shipmentStatusOptions, checkinMethodOptions } from '../constants/shipmentOptions';
 
+const allStatusOptions = shipmentStatusOptions;
+
 // Types (could be shared)
 type StatusType = string;
 interface CheckInFormData {
