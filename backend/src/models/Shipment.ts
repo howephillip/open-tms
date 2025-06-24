@@ -1,41 +1,41 @@
 // File: backend/src/models/Shipment.ts
 import mongoose, { Schema, Document } from 'mongoose';
-import { nanoid as generateNanoid, customAlphabet } from 'nanoid'; // Correct import for nanoid v3
+import { nanoid as generateNanoid, customAlphabet } from 'nanoid';
 import { logger } from '../utils/logger';
-import { ApplicationSettings, IQuoteFormSettings } from './ApplicationSettings'; // Ensure this exists and exports correctly
+import { ApplicationSettings, IQuoteFormSettings } from './ApplicationSettings';
 
 const nanoidTms = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 8);
 
 export interface IStop {
-  stopType: 'Pickup' | 'Dropoff' | 'Port' | 'Rail Ramp' | 'Other';
+  _id?: string;
+  stopType: 'Pickup' | 'Dropoff' | 'Port' | 'Rail Ramp' | 'Other' | 'Load' | 'Consignee';
   name?: string;
   address?: string;
   city?: string;
   state?: string;
   zip?: string;
   country?: string;
-  locationType?: string;
+  locationType?: 'Pickup' | 'Dropoff' | 'Port' | 'Rail Ramp' | 'Other' | 'Load' | 'Consignee';
   contactName?: string;
   contactPhone?: string;
   contactEmail?: string;
   notes?: string;
-  appointmentRequired?: boolean;
-  scheduledDateTime?: Date;
-  actualDateTime?: Date;
+  scheduledDateTime?: string;
+  actualDateTime?: string;
   appointmentNumber?: string;
   isLaneOrigin?: boolean;
   isLaneDestination?: boolean;
 }
 
 const stopSchema = new Schema<IStop>({
-  stopType: { type: String, enum: ['Pickup', 'Dropoff', 'Port', 'Rail Ramp', 'Other'], required: true },
+  stopType: { type: String, enum: ['Pickup', 'Load', 'Port', 'Rail Ramp', 'Dropoff', 'Consignee'], required: true },
   name: { type: String, trim: true },
   address: { type: String, trim: true },
   city: { type: String, trim: true },
   state: { type: String, trim: true },
   zip: { type: String, trim: true },
   country: { type: String, trim: true, default: 'USA' },
-  locationType: { type: String, enum: ['shipper_facility', 'port_terminal', 'rail_ramp', 'airport_cargo', 'warehouse', 'consignee_facility', 'other'], trim: true },
+  locationType: { type: String, enum: ['Pickup', 'Load', 'Port', 'Rail Ramp', 'Dropoff', 'Consignee'], trim: true },
   contactName: { type: String, trim: true },
   contactPhone: { type: String, trim: true },
   contactEmail: { type: String, trim: true, lowercase: true },
@@ -46,21 +46,22 @@ const stopSchema = new Schema<IStop>({
   appointmentNumber: { type: String, trim: true },
   isLaneOrigin: { type: Boolean, default: false },
   isLaneDestination: { type: Boolean, default: false },
-}, { _id: true }); // Use _id for array keying on the frontend
+}, { _id: true });
 
 
-export type ModeOfTransportType = // EXPORTED
+export type ModeOfTransportType = 
     | 'truckload-ftl' | 'truckload-ltl'
     | 'drayage-import' | 'drayage-export'
     | 'final-mile' | 'other';
 
-export type ShipmentStatusType = // EXPORTED
-    | 'quote' | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up'
+export type ShipmentStatusType = 
+    | 'quote' | 'quote_sent' | 'negotiating' | 'awaiting_approval' | 'approved' | 'rejected' | 'expired'
+    | 'booked' | 'dispatched' | 'at_pickup' | 'picked_up'
     | 'in_transit_origin_drayage' | 'at_origin_port_ramp' | 'in_transit_main_leg'
     | 'at_destination_port_ramp' | 'in_transit_destination_drayage' | 'at_delivery'
     | 'delivered' | 'pod_received' | 'invoiced' | 'paid' | 'cancelled' | 'on_hold' | 'problem';
 
-export interface IReferenceNumber { // EXPORTED
+export interface IReferenceNumber {
   type: string;
   value: string;
   _id?: mongoose.Types.ObjectId;
@@ -70,7 +71,7 @@ const referenceNumberSchema = new Schema<IReferenceNumber>({
   value: { type: String, required: true, trim: true }
 }, { _id: true });
 
-export interface IQuoteAccessorial { // EXPORTED
+export interface IQuoteAccessorial {
   accessorialTypeId: mongoose.Types.ObjectId;
   name?: string;
   quantity?: number;
@@ -88,7 +89,7 @@ const quoteAccessorialSchema = new Schema<IQuoteAccessorial>({
   notes: { type: String, trim: true },
 }, { _id: true });
 
-export interface IShipment extends Document { // EXPORTED
+export interface IShipment extends Document {
   shipmentNumber: string;
   billOfLadingNumber?: string;
   proNumber?: string;
@@ -139,16 +140,13 @@ export interface IShipment extends Document { // EXPORTED
   transloadFacility?: { name?: string; address?: string; city?: string; state?: string; zip?: string; };
   transloadDate?: Date;
   stops: IStop[];
-  //origin: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
-  //destination: { name?: string; address?: string; city?: string; state?: string; zip?: string; country?: string; locationType?: string; contactName?: string; contactPhone?: string; contactEmail?: string; notes?: string; };
-  scheduledPickupDate?: Date;
-  scheduledDeliveryDate?: Date;
-  scheduledPickupTime?: string;
-  pickupAppointmentNumber?: string;
-  actualPickupDateTime?: Date;
-  scheduledDeliveryTime?: string;
-  deliveryAppointmentNumber?: string;
-  actualDeliveryDateTime?: Date;
+
+  // --- ADDING NEW DATE FIELDS TO INTERFACE ---
+  eta?: Date;
+  pulledDate?: Date;
+  ingatedDate?: Date;
+  erdCutoffDate?: Date;
+  
   status: ShipmentStatusType;
   equipmentType?: string;
   equipmentLength?: number;
@@ -185,20 +183,6 @@ export interface IShipment extends Document { // EXPORTED
   createdAt?: Date;
   updatedAt?: Date;
 }
-
-const locationSchema = new Schema({
-    name: { type: String, trim: true },
-    address: { type: String, trim: true },
-    city: { type: String, trim: true },
-    state: { type: String, trim: true },
-    zip: { type: String, trim: true },
-    country: { type: String, trim: true, default: 'USA' },
-    locationType: { type: String, enum: ['shipper_facility', 'port_terminal', 'rail_ramp', 'airport_cargo', 'warehouse', 'consignee_facility', 'other'], trim: true },
-    contactName: { type: String, trim: true },
-    contactPhone: { type: String, trim: true },
-    contactEmail: { type: String, trim: true, lowercase: true },
-    notes: { type: String, trim: true },
-}, { _id: false });
 
 const modeOfTransportEnumValues: ModeOfTransportType[] = [
     'truckload-ftl', 'truckload-ltl', 'drayage-import', 'drayage-export',
@@ -264,16 +248,13 @@ const shipmentSchema = new Schema<IShipment>({
   transloadFacility: { name: String, address: String, city: String, state: String, zip: String },
   transloadDate: Date,
   stops: { type: [stopSchema], default: [] },
-  //origin: { type: locationSchema, required: false },
-  //destination: { type: locationSchema, required: false },
-  scheduledPickupDate: { type: Date, index: true },
-  scheduledDeliveryDate: { type: Date, index: true },
-  scheduledPickupTime: { type: String, trim: true },
-  pickupAppointmentNumber: { type: String, trim: true },
-  actualPickupDateTime: { type: Date },
-  scheduledDeliveryTime: { type: String, trim: true },
-  deliveryAppointmentNumber: { type: String, trim: true },
-  actualDeliveryDateTime: { type: Date },
+  
+  // --- ADDING NEW DATE FIELDS TO SCHEMA ---
+  eta: { type: Date },
+  pulledDate: { type: Date },
+  ingatedDate: { type: Date },
+  erdCutoffDate: { type: Date },
+
   status: { type: String, enum: statusEnumValues, default: 'booked', required: false, index: true },
   equipmentType: { type: String, trim: true },
   equipmentLength: { type: Number },
@@ -322,17 +303,10 @@ shipmentSchema.virtual('origin').get(function() {
   return this.stops.find(s => s.isLaneOrigin) || this.stops.find(s => s.stopType === 'Pickup' || s.stopType === 'Port');
 });
 
-// This finds the last dropoff-type stop and treats it as the "destination"
 shipmentSchema.virtual('destination').get(function() {
   if (!this.stops || this.stops.length === 0) return undefined;
   return [...this.stops].reverse().find(s => s.isLaneDestination) || [...this.stops].reverse().find(s => s.stopType === 'Dropoff');
 });
-
-const modelDefaultQuoteFormSettings: IQuoteFormSettings = {
-    requiredFields: [],
-    quoteNumberPrefix: 'QT-',
-    quoteNumberNextSequence: 1000, // Placeholder
-};
 
 shipmentSchema.pre<IShipment>('save', async function(next) {
   if (this.isNew && (!this.shipmentNumber || this.shipmentNumber.trim() === '')) {
@@ -377,5 +351,4 @@ shipmentSchema.index({ modeOfTransport: 1, status: 1 });
 shipmentSchema.index({ purchaseOrderNumbers: 1 }, {sparse: true});
 shipmentSchema.index({ createdBy: 1, createdAt: -1 });
 
-// Export the model as a named export
 export const Shipment = mongoose.model<IShipment>('Shipment', shipmentSchema);

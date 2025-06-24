@@ -255,6 +255,14 @@ export class ShipmentController {
   async updateShipment(req: AuthenticatedRequest, res: Response): Promise<void> {
     const { id } = req.params;
     logger.info(`--- UPDATE SHIPMENT - START (ID: ${id}) ---`);
+    logger.info(`--- RECEIVED UPDATE REQUEST for ID: ${id} ---`);
+    logger.info('Full request body received:', JSON.stringify(req.body, null, 2));
+    if(req.body.stops) {
+      logger.info('Inspecting "stops" array in request body:');
+      req.body.stops.forEach((stop: any, index: number) => {
+        logger.info(`  Stop ${index}:`, JSON.stringify(stop, null, 2));
+      });
+    }
     if (!mongoose.Types.ObjectId.isValid(id)) {
         return res.status(400).json({ success: false, message: 'Invalid shipment ID format.' });
     }
@@ -267,12 +275,8 @@ export class ShipmentController {
         
         const updateData = req.body;
 
-        // --- START OF FIX: Manually map ALL fields, including nested objects ---
-        
-        // Apply all direct fields from updateData to the Mongoose document
         Object.assign(shipmentToUpdate, updateData);
 
-        // Clear actual date fields if not provided (user cleared them in UI)
         const actualFields = ['actualPickupDate', 'actualPickupTime', 'actualDeliveryDate', 'actualDeliveryTime'];
         actualFields.forEach(field => {
           if (!updateData.hasOwnProperty(field)) {
@@ -280,18 +284,15 @@ export class ShipmentController {
           }
         });
 
-        // Explicitly handle the new 'stops' array if it exists
         if (updateData.stops && Array.isArray(updateData.stops)) {
             shipmentToUpdate.stops = updateData.stops;
         }
 
-        // Update origin and destination based on stops if stops is valid
         if (Array.isArray(shipmentToUpdate.stops) && shipmentToUpdate.stops.length >= 2) {
             shipmentToUpdate.origin = shipmentToUpdate.stops[0].location;
             shipmentToUpdate.destination = shipmentToUpdate.stops[shipmentToUpdate.stops.length - 1].location;
         }
 
-        // --- END OF FIX ---
         
         const financials = calculateFinancials(shipmentToUpdate.toObject());
         Object.assign(shipmentToUpdate, financials);

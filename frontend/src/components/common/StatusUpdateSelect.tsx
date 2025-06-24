@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'; // <<<--- THE FIX IS HERE
+import React, { useState, useEffect } from 'react';
 import { Select, MenuItem, CircularProgress, Box, SelectChangeEvent } from '@mui/material';
 import { useMutation, useQueryClient } from 'react-query';
 import { shipmentAPI } from '../../services/api';

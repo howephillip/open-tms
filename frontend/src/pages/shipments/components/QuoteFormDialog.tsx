@@ -47,7 +47,7 @@ interface QuoteFormDialogProps {
   equipmentTypesList: EquipmentTypeOption[]; isLoadingEquipmentTypes: boolean;
 }
 
-const stopTypeOptions = ['Pickup', 'Load', 'Port', 'Rail Ramp', 'Consignee'];
+const stopTypeOptions = ['Pickup', 'Load', 'Port', 'Rail Ramp', 'Dropoff', 'Consignee'];
 
 const formatFileSize = (bytes: number = 0): string => {
   if (bytes === 0) return '0 Bytes';
@@ -210,7 +210,13 @@ const QuoteFormDialog: React.FC<QuoteFormDialogProps> = ({
   };
 
   const handleSubmit = () => {
-    onSubmit(formData, formData._id);
+    // --- THIS IS THE FIX. We build the stops array here, making sure all fields are included. ---
+    const payload = { ...formData }; // Create a mutable copy of the form data
+    payload.stops = formData.stops.map(stop => ({
+      ...stop,
+      locationType: stop.stopType // Explicitly set locationType from stopType
+    }));
+    onSubmit(payload, payload._id);
   };
 
   return (

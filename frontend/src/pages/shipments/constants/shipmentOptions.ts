@@ -24,9 +24,15 @@ export const modeOfTransportOptions: ModeOfTransportType[] = [
 //    'invoiced', 'paid', 'cancelled', 'on_hold', 'problem' 
 //];
 
-export const locationTypeOptions: LocationType[] = [ 
-    'shipper_facility', 'consignee_facility', 'port_terminal', 'rail_ramp', 'airport_cargo', 'warehouse', 'other' 
+export const locationTypeOptions = [
+  'Pickup',
+  'Load',
+  'Port',
+  'Rail Ramp',
+  'Dropoff', // Ensure 'Dropoff' is here
+  'Consignee',
 ];
+
 export const weightUnitOptions: WeightUnitType[] = ['lbs', 'kg'];
 export const equipmentUnitOptions: EquipmentUnitType[] = ['ft', 'm'];
 export const tempUnitOptions: TempUnitType[] = ['C', 'F'];

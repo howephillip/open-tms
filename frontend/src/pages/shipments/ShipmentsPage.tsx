@@ -19,6 +19,13 @@ export interface Shipment {
   _id: string; shipmentNumber?: string; shipper: any; carrier: any;
   modeOfTransport: any; status: any; origin: any; destination: any;
   scheduledPickupDate: string; scheduledDeliveryDate: string;
+  proofOfDeliveryNumber?: string;
+  ingatedDate?: string;
+  lastFreeDay?: string;
+  actualPickupDate?: string;
+  actualPickupTime?: string;
+  actualDeliveryDate?: string;
+  actualDeliveryTime?: string;
   [key: string]: any; 
 }
 interface ShipperStub { _id: string; name: string; }
@@ -148,6 +155,7 @@ const ShipmentsPage: React.FC<ShipmentsPageProps> = ({ mode }) => {
         onDeleteItem={handleDeleteItem}
         getDisplayName={getDisplayName}
         getStatusColor={getStatusColor}
+        showExtraFields
       />
       
       {isShipmentFormOpen && editingShipmentInitialData && (
