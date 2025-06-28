@@ -1,5 +1,6 @@
 // File: frontend/src/App.tsx
 import React from 'react';
+
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { ReactQueryDevtools } from 'react-query/devtools';
@@ -11,7 +12,7 @@ import { Typography } from '@mui/material';
 
 import Layout from './components/layout/Layout';
 import Dashboard from './pages/dashboard/Dashboard';
-import QuotesPage from './pages/quotes/QuotesPage'; // --- IMPORT NEW PAGE ---
+import QuotesPage from './pages/quotes/QuotesPage';
 import ShipmentsPage from './pages/shipments/ShipmentsPage';
 import ShipmentDetailsView from './pages/shipments/ShipmentDetailsView';
 import CarriersPage from './pages/carriers/CarriersPage';
@@ -51,33 +52,30 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <Router>
-          <Layout>
-            <Routes>
-              <Route path="/" element={<Navigate replace to="/dashboard" />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              
-              <Route path="/quotes" element={<QuotesPage />} /> {/* --- ADDED ROUTE --- */}
-              <Route path="/shipments" element={<ShipmentsPage />} />
 
-              <Route path="/shipments/:shipmentId" element={<ShipmentDetailsView />} />
-              {/* The edit route can stay, it will redirect to the correct page based on status */}
-              <Route path="/shipments/edit/:shipmentId" element={<ShipmentsPage mode="edit" />} />
+          <Routes>
+            <Route path="/" element={<Layout />}>
 
-              <Route path="/carriers" element={<CarriersPage />} />
-              <Route path="/carriers/:carrierId" element={<CarrierDetailsView />} />
+              <Route index element={<Navigate replace to="/dashboard" />} />
               
-              <Route path="/shippers" element={<ShippersPage />} />
-              <Route path="/shippers/:shipperId" element={<ShipperDetailsView />} />
-              
-              <Route path="/financials" element={<Financials />} />
-              <Route path="/documents" element={<Documents />} />
-              <Route path="/settings" element={<SettingsPage />} />
-              <Route path="/lanerates" element={<LaneRatePage />} />
-              <Route path="/lanerates/detail" element={<LaneRateDetailPage />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="quotes" element={<QuotesPage />} />
+              <Route path="shipments" element={<ShipmentsPage />} />
+              <Route path="shipments/edit/:shipmentId" element={<ShipmentsPage mode="edit" />} />
+              <Route path="shipments/:shipmentId" element={<ShipmentDetailsView />} />
+              <Route path="carriers" element={<CarriersPage />} />
+              <Route path="carriers/:carrierId" element={<CarrierDetailsView />} />
+              <Route path="shippers" element={<ShippersPage />} />
+              <Route path="shippers/:shipperId" element={<ShipperDetailsView />} />
+              <Route path="financials" element={<Financials />} />
+              <Route path="documents" element={<Documents />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="lanerates" element={<LaneRatePage />} />
+              <Route path="lanerates/detail" element={<LaneRateDetailPage />} />
               
               <Route path="*" element={<Typography variant="h3" sx={{p:3}}>404 - Page Not Found</Typography>} />
-            </Routes>
-          </Layout>
+            </Route>
+          </Routes>
         </Router>
         <ToastContainer
             position="top-right"
